@@ -1,0 +1,66 @@
+### Node
+*/node_modules/*
+/node_modules/*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+### Environment
+.env
+.env.*.local
+.env.local
+
+### Build / output
+.svelte-kit/
+build/
+dist/
+public/build/
+/.vite/
+/.parcel-cache/
+
+### Tests / coverage
+coverage/
+coverage-final.json
+*.lcov
+
+### TypeScript
+*.tsbuildinfo
+
+### Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+### Logs
+*.log
+logs/
+
+### Misc
+.cache/
+.turbo/
+.vercel/
+.netlify/
+/.firebase/
+/.sass-cache/
+
+# Keep example and config files in repo (uncomment if you prefer to ignore)
+# .env.example
+# yarn.lock
+
+### Optional / platform
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Python virtualenvs
+venv/
+.venv/
+ENV/
+.python-version
+
+# CI / caches
+.cache/
+.npm/
+
