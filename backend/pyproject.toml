@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stt-local-backend"
+version = "0.1.0"
+description = "Local Speech-to-Text backend using SimulStreaming (UFAL)"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "websockets",
+    "numpy",
+    "torch",
+    "torchaudio",
+    "librosa",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+cuda = ["faster-whisper"]
+mps = ["mlx-whisper"]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

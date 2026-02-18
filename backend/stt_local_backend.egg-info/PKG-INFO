@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: stt-local-backend
+Version: 0.1.0
+Summary: Local Speech-to-Text backend using SimulStreaming (UFAL)
+Requires-Python: >=3.10
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: websockets
+Requires-Dist: numpy
+Requires-Dist: torch
+Requires-Dist: torchaudio
+Requires-Dist: librosa
+Requires-Dist: pydantic-settings
+Provides-Extra: cuda
+Requires-Dist: faster-whisper; extra == "cuda"
+Provides-Extra: mps
+Requires-Dist: mlx-whisper; extra == "mps"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Requires-Dist: httpx; extra == "dev"
