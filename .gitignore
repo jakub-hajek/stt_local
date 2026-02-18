@@ -68,3 +68,5 @@ __pycache__/
 .cache/
 .npm/
 
+backend/.coverage
+backend/.coverage

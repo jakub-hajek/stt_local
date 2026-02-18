@@ -13,6 +13,7 @@ faster-whisper
 [dev]
 pytest
 pytest-asyncio
+pytest-cov
 httpx
 
 [mps]
