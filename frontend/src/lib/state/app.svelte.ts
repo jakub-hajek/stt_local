@@ -4,6 +4,7 @@ class AppState {
 	language: Language = $state('cs');
 	chunkInterval: number = $state(5000);
 	isRecording: boolean = $state(false);
+	isProcessingFile: boolean = $state(false);
 	modelStatus: ModelStatus = $state('idle');
 	modelError: string | null = $state(null);
 	settingsOpen: boolean = $state(false);
@@ -29,6 +30,10 @@ class AppState {
 
 	toggleSettings() {
 		this.settingsOpen = !this.settingsOpen;
+	}
+
+	setProcessingFile(value: boolean) {
+		this.isProcessingFile = value;
 	}
 
 	setModelStatus(status: ModelStatus) {

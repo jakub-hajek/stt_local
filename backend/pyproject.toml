@@ -16,6 +16,7 @@ dependencies = [
     "torchaudio",
     "librosa",
     "pydantic-settings",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]

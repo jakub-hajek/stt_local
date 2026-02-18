@@ -8,6 +8,7 @@
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import ModelStatus from '$lib/components/ModelStatus.svelte';
 	import MicControl from '$lib/components/MicControl.svelte';
+	import FileUpload from '$lib/components/FileUpload.svelte';
 	import Waveform from '$lib/components/Waveform.svelte';
 	import TranscriptDisplay from '$lib/components/TranscriptDisplay.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
@@ -82,6 +83,40 @@
 		audioCapture.stop();
 		transcriber.disconnect();
 	}
+
+	async function handleFileUpload(file: File) {
+		appState.setProcessingFile(true);
+		try {
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('language', appState.language);
+
+			const resp = await fetch(`${appState.httpServerUrl}/api/transcribe`, {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!resp.ok) {
+				const err = await resp.json().catch(() => ({ detail: 'Upload failed' }));
+				console.error('Transcription failed:', err.detail);
+				return;
+			}
+
+			const data = await resp.json();
+			if (data.text) {
+				transcriptState.addEntry({
+					text: data.text,
+					timestamp: Date.now(),
+					language: appState.language,
+					isFinal: true,
+				});
+			}
+		} catch (err) {
+			console.error('File upload failed:', err);
+		} finally {
+			appState.setProcessingFile(false);
+		}
+	}
 </script>
 
 <main>
@@ -115,6 +150,7 @@
 		<Waveform />
 		<div class="mic-row">
 			<MicControl onstart={handleStart} onstop={handleStop} />
+			<FileUpload onfile={handleFileUpload} />
 			{#if appState.connectionStatus === 'ready' && appState.isRecording}
 				<span class="status-info">Streaming...</span>
 			{/if}

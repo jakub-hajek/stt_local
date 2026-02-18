@@ -19,11 +19,31 @@ class TestDetectBackendMacOSMlx:
             # Make mlx_whisper importable
             fake_mlx = ModuleType("mlx_whisper")
             monkeypatch.setitem(sys.modules, "mlx_whisper", fake_mlx)
+            mock_torch = MagicMock()
+            mock_torch.backends.mps.is_available.return_value = True
+            monkeypatch.setitem(sys.modules, "torch", mock_torch)
 
             backend, device = detect_backend()
 
         assert backend == "mlx-whisper"
         assert device == "mps"
+
+    def test_falls_through_when_mps_unavailable(self, monkeypatch: "pytest.MonkeyPatch"):
+        with (
+            patch("app.engine.detector.platform.system", return_value="Darwin"),
+            patch("app.engine.detector.platform.machine", return_value="arm64"),
+        ):
+            fake_mlx = ModuleType("mlx_whisper")
+            monkeypatch.setitem(sys.modules, "mlx_whisper", fake_mlx)
+            mock_torch = MagicMock()
+            mock_torch.backends.mps.is_available.return_value = False
+            mock_torch.cuda.is_available.return_value = False
+            monkeypatch.setitem(sys.modules, "torch", mock_torch)
+
+            backend, device = detect_backend()
+
+        assert backend == "faster-whisper"
+        assert device == "cpu"
 
 
 class TestDetectBackendCuda:

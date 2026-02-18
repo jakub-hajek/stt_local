@@ -1,6 +1,7 @@
 """FastAPI application entry point for STT Local backend."""
 
 import logging
+import warnings
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -10,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.engine.detector import detect_backend
 from app.engine.factory import TranscriptionEngine
-from app.routes import health, websocket
+from app.routes import health, upload, websocket
 
 
 def _setup_logging() -> None:
@@ -23,10 +24,28 @@ def _setup_logging() -> None:
     )
 
 
+def _setup_warnings() -> None:
+    """Filter a known PyTorch deprecation warning emitted by SimulStreaming.
+
+    This warning currently comes from an internal torch operation used by the
+    SimulStreaming stack and can flood logs while not affecting behavior.
+    """
+    warnings.filterwarnings(
+        "ignore",
+        message=(
+            r"An output with one or more elements was resized since it had shape \[\], "
+            r"which does not match the required output shape"
+        ),
+        category=UserWarning,
+        module=r"torch\.functional",
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: load the transcription model at startup."""
     _setup_logging()
+    _setup_warnings()
     logger = logging.getLogger(__name__)
 
     backend, device = detect_backend()
@@ -64,4 +83,5 @@ app.add_middleware(
 
 # Routers
 app.include_router(health.router)
+app.include_router(upload.router)
 app.include_router(websocket.router)

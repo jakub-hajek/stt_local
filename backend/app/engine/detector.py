@@ -18,15 +18,37 @@ def detect_backend() -> tuple[str, str]:
     Returns:
         Tuple of (backend_name, device_name).
     """
-    # 1. Check for macOS ARM64 + mlx-whisper
+    # 1. Check for macOS ARM64 + mlx-whisper + PyTorch MPS availability
     if platform.system() == "Darwin" and platform.machine() == "arm64":
+        has_mlx_whisper = False
         try:
             import mlx_whisper  # noqa: F401
 
-            logger.info("Detected macOS ARM64 with mlx-whisper -> using mlx-whisper on mps")
-            return ("mlx-whisper", "mps")
+            has_mlx_whisper = True
         except ImportError:
-            logger.debug("mlx_whisper not importable on macOS ARM64, continuing detection")
+            logger.warning(
+                "Apple Silicon detected but mlx-whisper is not installed. "
+                "Run `make install-be` to install backend MPS dependencies."
+            )
+
+        if has_mlx_whisper:
+            try:
+                import torch
+
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    logger.info(
+                        "Detected macOS ARM64 with mlx-whisper and MPS -> using mlx-whisper on mps"
+                    )
+                    return ("mlx-whisper", "mps")
+                logger.warning(
+                    "Apple Silicon detected and mlx-whisper installed, "
+                    "but PyTorch MPS is unavailable. Falling back."
+                )
+            except ImportError:
+                logger.warning(
+                    "Apple Silicon detected and mlx-whisper installed, "
+                    "but torch is not importable. Falling back."
+                )
 
     # 2. Check for CUDA + faster-whisper
     try:

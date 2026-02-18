@@ -70,3 +70,12 @@ __pycache__/
 
 backend/.coverage
 backend/.coverage
+
+# Local external dependency clone
+SimulStreaming/
+test_stt.mp3
+large-v3-turbo.pt
+backend/large-v3.pt
+tiny.pt
+test_stt.wav
+medium.pt

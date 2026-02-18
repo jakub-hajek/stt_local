@@ -84,6 +84,8 @@ class TranscriptionEngine:
 
             from simulstreaming_whisper import simul_asr_factory, simulwhisper_args
 
+            self._force_simulstreaming_device(device)
+
             parser = argparse.ArgumentParser()
             parser.add_argument("--min-chunk-size", type=float, default=1.2)
             parser.add_argument("--lan", type=str, default=language)
@@ -119,6 +121,42 @@ class TranscriptionEngine:
             self._loaded = True
 
             logger.info("Model loaded successfully")
+
+    @staticmethod
+    def _force_simulstreaming_device(device: str) -> None:
+        """Force SimulStreaming's internal Whisper loader to honor our detected device.
+
+        SimulStreaming's bundled Whisper loader defaults to CUDA/CPU when no explicit
+        device is passed. Our integration does not pass a device through its CLI args,
+        so on Apple Silicon it can silently fall back to CPU.
+        """
+        try:
+            import simulstreaming.whisper.simul_whisper.simul_whisper as simul_whisper_mod
+        except ImportError:
+            # Tests use a stub module and may not provide the full package tree.
+            return
+
+        original_load_model = simul_whisper_mod.load_model
+        if getattr(original_load_model, "__stt_local_forced_device__", None) == device:
+            return
+
+        def _load_model_with_forced_device(
+            name: str,
+            device_arg: str | None = None,
+            download_root: str | None = None,
+            in_memory: bool = False,
+        ):
+            selected_device = device_arg or device
+            return original_load_model(
+                name=name,
+                device=selected_device,
+                download_root=download_root,
+                in_memory=in_memory,
+            )
+
+        setattr(_load_model_with_forced_device, "__stt_local_forced_device__", device)
+        simul_whisper_mod.load_model = _load_model_with_forced_device
+        logger.info("Forced SimulStreaming Whisper loader device=%s", device)
 
     def create_session(self) -> Any:
         """Create a new online session processor for a single transcription session.
