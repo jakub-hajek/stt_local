@@ -1,6 +1,17 @@
 <script lang="ts">
   import { transcriptState } from '$lib/state/transcript.svelte';
+  import { tick } from 'svelte';
   let copied = $state(false);
+  let contentEl: HTMLDivElement;
+
+  $effect(() => {
+    transcriptState.entries.length;
+    tick().then(() => {
+      if (contentEl) {
+        contentEl.scrollTop = contentEl.scrollHeight;
+      }
+    });
+  });
 
   async function copyAll() {
     const text = transcriptState.fullText;
@@ -38,7 +49,7 @@
     </div>
   </div>
 
-  <div class="transcript-content" role="log" aria-live="polite">
+  <div class="transcript-content" role="log" aria-live="polite" bind:this={contentEl}>
     {#if transcriptState.entries.length === 0}
       <p class="empty-state">Transcript will appear here...</p>
     {:else}
@@ -100,6 +111,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    scroll-behavior: smooth;
   }
 
   .empty-state {
