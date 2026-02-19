@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SpeechRecognitionService } from './recognition.svelte';
 
 function makeResultEvent(
@@ -17,9 +17,15 @@ describe('SpeechRecognitionService', () => {
 	let service: SpeechRecognitionService;
 
 	beforeEach(() => {
+		vi.useFakeTimers();
 		vi.clearAllMocks();
 		onFinal = vi.fn();
 		service = new SpeechRecognitionService(onFinal);
+	});
+
+	afterEach(() => {
+		service.stop();
+		vi.useRealTimers();
 	});
 
 	describe('constructor', () => {
@@ -95,18 +101,15 @@ describe('SpeechRecognitionService', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
 
-			// First event: result[0] is final
 			rec.onresult(makeResultEvent([
 				{ transcript: 'first', isFinal: true },
 			]));
 			expect(onFinal).toHaveBeenCalledTimes(1);
 
-			// Second event: result[0] still final, result[1] is new final
 			rec.onresult(makeResultEvent([
 				{ transcript: 'first', isFinal: true },
 				{ transcript: 'second', isFinal: true },
 			]));
-			// Should only emit 'second', not 'first' again
 			expect(onFinal).toHaveBeenCalledTimes(2);
 			expect(onFinal).toHaveBeenLastCalledWith('second');
 		});
@@ -115,20 +118,17 @@ describe('SpeechRecognitionService', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
 
-			// First event: result[0] is interim
 			rec.onresult(makeResultEvent([
 				{ transcript: 'hello', isFinal: false },
 			]));
 			expect(onFinal).not.toHaveBeenCalled();
 
-			// Second event: result[0] finalized, result[1] started as interim
-			// Chrome may set resultIndex=1 here, but we scan from 0
 			rec.onresult(makeResultEvent(
 				[
 					{ transcript: 'hello world', isFinal: true },
 					{ transcript: 'next', isFinal: false },
 				],
-				1 // resultIndex=1, but result[0] was just finalized
+				1
 			));
 			expect(onFinal).toHaveBeenCalledWith('hello world');
 			expect(service.interimText).toBe('next');
@@ -164,6 +164,7 @@ describe('SpeechRecognitionService', () => {
 			rec.start.mockClear();
 
 			rec.onend();
+			// No delay on first clean restart
 			expect(rec.start).toHaveBeenCalledTimes(1);
 		});
 
@@ -182,7 +183,6 @@ describe('SpeechRecognitionService', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
 
-			// Simulate interim text that was never finalized
 			rec.onresult(makeResultEvent([{ transcript: 'pending words', isFinal: false }]));
 			expect(service.interimText).toBe('pending words');
 
@@ -200,6 +200,150 @@ describe('SpeechRecognitionService', () => {
 		});
 	});
 
+	describe('restart backoff', () => {
+		it('delays restart on rapid consecutive onend events', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+			rec.start.mockClear();
+
+			// First onend — immediate restart
+			rec.onend();
+			expect(rec.start).toHaveBeenCalledTimes(1);
+			rec.start.mockClear();
+
+			// Second onend within 1s — should delay
+			rec.onend();
+			expect(rec.start).not.toHaveBeenCalled();
+
+			// Advance past the backoff delay
+			vi.advanceTimersByTime(300);
+			expect(rec.start).toHaveBeenCalledTimes(1);
+		});
+
+		it('resets backoff counter after stable session', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+			rec.start.mockClear();
+
+			// First rapid restart
+			rec.onend();
+			rec.start.mockClear();
+
+			// Advance 2 seconds (longer than 1s rapid threshold)
+			vi.advanceTimersByTime(2000);
+			rec.onend();
+
+			// Should restart immediately (not rapid anymore)
+			expect(rec.start).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('network error recovery', () => {
+		it('adds delay before restart after network error', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+			rec.start.mockClear();
+
+			rec.onerror({ error: 'network' });
+			// Advance well past rapid-restart window so only network delay applies
+			vi.advanceTimersByTime(2000);
+			rec.onend();
+			// Should not restart immediately
+			expect(rec.start).not.toHaveBeenCalled();
+
+			// Advance past network retry delay
+			vi.advanceTimersByTime(2000);
+			expect(rec.start).toHaveBeenCalledTimes(1);
+		});
+
+		it('clears network flag after one restart', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			rec.onerror({ error: 'network' });
+			vi.advanceTimersByTime(2000);
+			rec.onend();
+			vi.advanceTimersByTime(2000);
+			rec.start.mockClear();
+
+			// Next onend (no error) — should restart with no extra delay
+			vi.advanceTimersByTime(2000);
+			rec.onend();
+			expect(rec.start).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('stale interim watchdog', () => {
+		it('forces stop/restart when interim text stalls for 5s', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			rec.onresult(makeResultEvent([{ transcript: 'stuck text', isFinal: false }]));
+			expect(service.interimText).toBe('stuck text');
+
+			// Advance past stale timeout
+			vi.advanceTimersByTime(5000);
+
+			// Should have called recognition.stop() to trigger flush
+			expect(rec.stop).toHaveBeenCalled();
+		});
+
+		it('does not trigger if interim text changes', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			rec.onresult(makeResultEvent([{ transcript: 'hello', isFinal: false }]));
+			vi.advanceTimersByTime(3000);
+
+			// Interim text changes — resets the watchdog
+			rec.onresult(makeResultEvent([{ transcript: 'hello world', isFinal: false }]));
+			vi.advanceTimersByTime(3000);
+
+			// Only 3s since last change, should not have triggered
+			expect(rec.stop).not.toHaveBeenCalled();
+		});
+
+		it('does not trigger when there is no interim text', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			vi.advanceTimersByTime(6000);
+			expect(rec.stop).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('session age restart', () => {
+		it('proactively restarts after session max age', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			vi.advanceTimersByTime(12 * 60_000);
+
+			// Should have called stop() to trigger restart
+			expect(rec.stop).toHaveBeenCalled();
+		});
+
+		it('defers restart when speech is active', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			// Simulate active speech near the session max age
+			vi.advanceTimersByTime(11 * 60_000);
+			rec.onresult(makeResultEvent([{ transcript: 'talking', isFinal: false }]));
+
+			vi.advanceTimersByTime(60_000);
+			// Should NOT stop because there's active interim text
+			const stopCalls = rec.stop.mock.calls.length;
+
+			// Finalize the speech
+			rec.onresult(makeResultEvent([{ transcript: 'talking done', isFinal: true }]));
+
+			// Advance past the deferred timer
+			vi.advanceTimersByTime(12 * 60_000);
+			expect(rec.stop.mock.calls.length).toBeGreaterThan(stopCalls);
+		});
+	});
+
 	describe('onerror', () => {
 		it('stops permanently for not-allowed', () => {
 			service.start('en');
@@ -208,6 +352,7 @@ describe('SpeechRecognitionService', () => {
 			rec.start.mockClear();
 
 			rec.onend();
+			vi.advanceTimersByTime(10000);
 			expect(rec.start).not.toHaveBeenCalled();
 		});
 

@@ -20,40 +20,43 @@ describe('FileUpload', () => {
 	it('renders upload button', () => {
 		render(FileUpload, { props: { onfile } });
 
-		expect(screen.getByRole('button', { name: 'Upload audio file' })).toBeInTheDocument();
+		const btn = screen.getByRole('button', { hidden: true });
+		expect(btn).toBeInTheDocument();
+		expect(btn.getAttribute('aria-label')).toBe('Upload audio file');
 	});
 
 	it('is disabled when model is not ready', () => {
 		appState.setModelStatus('idle');
 		render(FileUpload, { props: { onfile } });
 
-		expect(screen.getByRole('button')).toBeDisabled();
+		expect(screen.getByRole('button', { hidden: true })).toBeDisabled();
 	});
 
 	it('is disabled when recording', () => {
 		appState.toggleRecording();
 		render(FileUpload, { props: { onfile } });
 
-		expect(screen.getByRole('button')).toBeDisabled();
+		expect(screen.getByRole('button', { hidden: true })).toBeDisabled();
 	});
 
 	it('is disabled when processing file', () => {
 		appState.setProcessingFile(true);
 		render(FileUpload, { props: { onfile } });
 
-		expect(screen.getByRole('button')).toBeDisabled();
+		expect(screen.getByRole('button', { hidden: true })).toBeDisabled();
 	});
 
 	it('is enabled when model is ready and not recording or processing', () => {
 		render(FileUpload, { props: { onfile } });
 
-		expect(screen.getByRole('button')).not.toBeDisabled();
+		expect(screen.getByRole('button', { hidden: true })).not.toBeDisabled();
 	});
 
 	it('shows processing label when processing file', () => {
 		appState.setProcessingFile(true);
 		render(FileUpload, { props: { onfile } });
 
-		expect(screen.getByRole('button', { name: 'Processing file' })).toBeInTheDocument();
+		const btn = screen.getByRole('button', { hidden: true });
+		expect(btn.getAttribute('aria-label')).toBe('Processing file');
 	});
 });

@@ -84,6 +84,31 @@
 		appState.toggleRecording();
 		log('recording stopped');
 	}
+
+	let errorFading = $state(false);
+	let errorTimerId: ReturnType<typeof setTimeout> | null = null;
+
+	$effect(() => {
+		if (speech.error) {
+			errorFading = false;
+			if (errorTimerId) clearTimeout(errorTimerId);
+			// Start fade-out after 4s, then clear after 1s fade
+			errorTimerId = setTimeout(() => {
+				errorFading = true;
+				errorTimerId = setTimeout(() => {
+					speech.error = null;
+					errorFading = false;
+					errorTimerId = null;
+				}, 1000);
+			}, 4000);
+		}
+		return () => {
+			if (errorTimerId) {
+				clearTimeout(errorTimerId);
+				errorTimerId = null;
+			}
+		};
+	});
 </script>
 
 <main>
@@ -111,7 +136,7 @@
 		</section>
 
 		{#if speech.error}
-			<div class="error">Speech recognition error: {speech.error}</div>
+			<div class="error" class:error-fading={errorFading}>Speech recognition error: {speech.error}</div>
 		{/if}
 	{/if}
 
@@ -212,5 +237,11 @@
 		border-radius: var(--radius);
 		color: var(--red);
 		font-size: 0.875rem;
+		opacity: 1;
+		transition: opacity 1s ease-out;
+	}
+
+	.error-fading {
+		opacity: 0;
 	}
 </style>

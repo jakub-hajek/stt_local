@@ -39,7 +39,9 @@ describe('TranscriptDisplay', () => {
 		render(TranscriptDisplay);
 
 		expect(screen.getByText('Hello world')).toBeInTheDocument();
-		expect(screen.getByText('01:05')).toBeInTheDocument();
+		// The component uses toLocaleTimeString() which is timezone-dependent
+		const expectedTime = new Date(65000).toLocaleTimeString();
+		expect(screen.getByText(expectedTime)).toBeInTheDocument();
 	});
 
 	it('enables buttons when entries exist', () => {

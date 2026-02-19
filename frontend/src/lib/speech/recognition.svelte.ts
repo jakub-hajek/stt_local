@@ -23,6 +23,21 @@ const LANG_MAP: Record<Language, string> = {
 	auto: '',
 };
 
+/** How long interim text can sit unchanged before we force a stop/restart cycle (ms). */
+const STALE_INTERIM_TIMEOUT = 5_000;
+
+/** Proactively restart session after this long to prevent Chrome degradation (ms). */
+const SESSION_MAX_AGE = 12 * 60_000;
+
+/** Base delay between rapid restarts (ms). Doubles on each consecutive rapid restart. */
+const RESTART_BASE_DELAY = 200;
+
+/** Max backoff delay for restarts (ms). */
+const RESTART_MAX_DELAY = 5_000;
+
+/** Extra delay before restarting after a network error (ms). */
+const NETWORK_RETRY_DELAY = 2_000;
+
 export class SpeechRecognitionService {
 	isListening = $state(false);
 	isSupported = $state(false);
@@ -32,8 +47,24 @@ export class SpeechRecognitionService {
 	private recognition: SpeechRecognitionInstance | null = null;
 	private shouldRestart = false;
 	private lastInterim = '';
-	private emittedUpTo = 0; // how many results we've already emitted as final
+	private emittedUpTo = 0;
 	private readonly onFinal: (text: string) => void;
+
+	// Stale interim watchdog: forces stop/restart if interim text doesn't change
+	private staleTimer: ReturnType<typeof setTimeout> | null = null;
+	private lastInterimSnapshot = '';
+
+	// Session age restart: proactively refresh long-running sessions
+	private sessionTimer: ReturnType<typeof setTimeout> | null = null;
+	private sessionStartedAt = 0;
+
+	// Restart backoff: prevent hot-spinning restart loops
+	private lastEndTime = 0;
+	private consecutiveRapidRestarts = 0;
+	private restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Network error tracking
+	private lastErrorWasNetwork = false;
 
 	constructor(onFinal: (text: string) => void) {
 		this.onFinal = onFinal;
@@ -84,12 +115,14 @@ export class SpeechRecognitionService {
 			if (interim) {
 				log('interim:', interim);
 			}
+			this.resetStaleWatchdog();
 		};
 
 		recognition.onerror = (event) => {
 			log('onerror:', event.error);
 			if (event.error === 'aborted' || event.error === 'no-speech') return;
 			this.error = event.error;
+			this.lastErrorWasNetwork = event.error === 'network';
 			if (event.error === 'not-allowed') {
 				this.shouldRestart = false;
 			}
@@ -97,6 +130,10 @@ export class SpeechRecognitionService {
 
 		recognition.onend = () => {
 			log('onend: shouldRestart=%s, pendingInterim="%s"', this.shouldRestart, this.lastInterim);
+
+			this.clearStaleWatchdog();
+			this.clearSessionTimer();
+
 			// Chrome can terminate a continuous session at any time (long silence,
 			// internal timeout, network hiccup) without finalizing the last interim
 			// result. Flush whatever interim text we have so it isn't lost.
@@ -106,14 +143,20 @@ export class SpeechRecognitionService {
 				this.lastInterim = '';
 				this.interimText = '';
 			}
+
 			// Reset counter — Chrome starts a fresh results list on restart
 			this.emittedUpTo = 0;
+
 			if (this.shouldRestart) {
-				try {
-					recognition.start();
-				} catch {
-					this.isListening = false;
-					this.shouldRestart = false;
+				const delay = this.computeRestartDelay();
+				if (delay > 0) {
+					log('delaying restart by %dms', delay);
+					this.restartTimer = setTimeout(() => {
+						this.restartTimer = null;
+						this.doRestart(recognition);
+					}, delay);
+				} else {
+					this.doRestart(recognition);
 				}
 			} else {
 				this.isListening = false;
@@ -129,12 +172,17 @@ export class SpeechRecognitionService {
 		this.lastInterim = '';
 		this.interimText = '';
 		this.emittedUpTo = 0;
+		this.consecutiveRapidRestarts = 0;
+		this.lastErrorWasNetwork = false;
 		this.recognition.lang = LANG_MAP[lang];
 		this.shouldRestart = true;
 		this.isListening = true;
 		log('start: lang=%s', LANG_MAP[lang] || '(auto)');
 		try {
 			this.recognition.start();
+			this.sessionStartedAt = Date.now();
+			this.startSessionTimer();
+			this.resetStaleWatchdog();
 		} catch {
 			this.isListening = false;
 			this.shouldRestart = false;
@@ -144,6 +192,132 @@ export class SpeechRecognitionService {
 	stop() {
 		log('stop');
 		this.shouldRestart = false;
+		this.clearStaleWatchdog();
+		this.clearSessionTimer();
+		this.clearRestartTimer();
 		this.recognition?.stop();
+	}
+
+	// ── Restart with backoff ──────────────────────────────────────────
+
+	private doRestart(recognition: SpeechRecognitionInstance) {
+		try {
+			recognition.start();
+			this.sessionStartedAt = Date.now();
+			this.startSessionTimer();
+			this.resetStaleWatchdog();
+			log('restarted');
+		} catch {
+			this.isListening = false;
+			this.shouldRestart = false;
+		}
+	}
+
+	/**
+	 * Compute how long to wait before restarting. Combines:
+	 * - Exponential backoff for rapid restarts (onend firing within 1s of each other)
+	 * - Extra delay after network errors to avoid hammering Google's servers
+	 */
+	private computeRestartDelay(): number {
+		const now = Date.now();
+		const sinceLastEnd = now - this.lastEndTime;
+		this.lastEndTime = now;
+
+		// Track rapid restarts (onend within 1 second of last onend)
+		if (sinceLastEnd < 1000) {
+			this.consecutiveRapidRestarts++;
+		} else {
+			this.consecutiveRapidRestarts = 0;
+		}
+
+		let delay = 0;
+
+		// Exponential backoff for rapid restart loops
+		if (this.consecutiveRapidRestarts > 0) {
+			delay = Math.min(
+				RESTART_BASE_DELAY * Math.pow(2, this.consecutiveRapidRestarts - 1),
+				RESTART_MAX_DELAY
+			);
+			log('rapid restart #%d, backoff=%dms', this.consecutiveRapidRestarts, delay);
+		}
+
+		// Extra delay after network errors
+		if (this.lastErrorWasNetwork) {
+			delay = Math.max(delay, NETWORK_RETRY_DELAY);
+			this.lastErrorWasNetwork = false;
+			log('network error recovery delay=%dms', delay);
+		}
+
+		return delay;
+	}
+
+	private clearRestartTimer() {
+		if (this.restartTimer !== null) {
+			clearTimeout(this.restartTimer);
+			this.restartTimer = null;
+		}
+	}
+
+	// ── Stale interim watchdog ────────────────────────────────────────
+
+	/**
+	 * If interim text hasn't changed for STALE_INTERIM_TIMEOUT, Chrome may have
+	 * stalled without firing onend. Force a stop() which triggers onend → flush
+	 * → restart cycle, recovering the stuck interim text.
+	 */
+	private resetStaleWatchdog() {
+		this.clearStaleWatchdog();
+		if (!this.shouldRestart) return;
+		this.lastInterimSnapshot = this.lastInterim;
+		this.staleTimer = setTimeout(() => {
+			this.staleTimer = null;
+			if (!this.shouldRestart || !this.lastInterim.trim()) return;
+			if (this.lastInterim === this.lastInterimSnapshot) {
+				log('stale interim detected ("%s"), forcing stop/restart', this.lastInterim.trim());
+				// stop() sets shouldRestart=false, but we want to restart after flush
+				this.recognition?.stop();
+				// shouldRestart is still true here (we didn't call this.stop())
+			}
+		}, STALE_INTERIM_TIMEOUT);
+	}
+
+	private clearStaleWatchdog() {
+		if (this.staleTimer !== null) {
+			clearTimeout(this.staleTimer);
+			this.staleTimer = null;
+		}
+	}
+
+	// ── Session age restart ───────────────────────────────────────────
+
+	/**
+	 * Chrome's continuous mode degrades over very long sessions (60+ minutes).
+	 * Proactively stop and restart every SESSION_MAX_AGE to keep the session fresh.
+	 * Only triggers during silence (no pending interim text) to avoid interrupting
+	 * active speech.
+	 */
+	private startSessionTimer() {
+		this.clearSessionTimer();
+		this.sessionTimer = setTimeout(() => {
+			this.sessionTimer = null;
+			if (!this.shouldRestart) return;
+			if (this.lastInterim.trim()) {
+				// Active speech — defer restart, check again in 10s
+				log('session age restart deferred (active speech)');
+				this.startSessionTimer();
+				return;
+			}
+			const age = Date.now() - this.sessionStartedAt;
+			log('proactive session restart after %ds', Math.round(age / 1000));
+			// stop() triggers onend → flush → restart
+			this.recognition?.stop();
+		}, SESSION_MAX_AGE);
+	}
+
+	private clearSessionTimer() {
+		if (this.sessionTimer !== null) {
+			clearTimeout(this.sessionTimer);
+			this.sessionTimer = null;
+		}
 	}
 }
