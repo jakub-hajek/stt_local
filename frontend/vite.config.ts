@@ -3,6 +3,11 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [sveltekit()],
+	build: {
+		// Prevent inlining assets as data URIs — AudioWorklet modules
+		// require a proper JS file URL (data URIs get wrong MIME type).
+		assetsInlineLimit: 0
+	},
 	server: {
 		headers: {
 			'Cross-Origin-Embedder-Policy': 'require-corp',

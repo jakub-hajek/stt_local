@@ -1,9 +1,3 @@
-declare abstract class AudioWorkletProcessor {
-	readonly port: MessagePort;
-	abstract process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean;
-}
-declare function registerProcessor(name: string, ctor: new () => AudioWorkletProcessor): void;
-
 /**
  * AudioWorkletProcessor that collects PCM samples and posts them
  * to the main thread in fixed-size buffers.
@@ -12,18 +6,19 @@ declare function registerProcessor(name: string, ctor: new () => AudioWorkletPro
  * (set by the AudioContext that loads this processor).
  */
 class PcmProcessor extends AudioWorkletProcessor {
-	private buffer: Float32Array;
-	private offset = 0;
+	/** @type {Float32Array} */
+	buffer;
+	offset = 0;
 
 	/** ~100ms at 16 kHz = 1600 samples */
-	private readonly BUFFER_SIZE = 1600;
+	BUFFER_SIZE = 1600;
 
 	constructor() {
 		super();
 		this.buffer = new Float32Array(this.BUFFER_SIZE);
 	}
 
-	process(inputs: Float32Array[][]): boolean {
+	process(inputs) {
 		const input = inputs[0];
 		if (!input || input.length === 0) return true;
 

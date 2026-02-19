@@ -11,7 +11,7 @@ Built with a **FastAPI + mlx-whisper** backend and a **SvelteKit** frontend, STT
 - **Apple Silicon acceleration** — uses mlx-whisper for fast inference on MPS
 - **File upload transcription** — upload audio files (WAV, MP3, FLAC, OGG, etc.) for batch transcription
 - **Live waveform visualization** — real-time frequency display via Canvas + AnalyserNode
-- **Multi-language** — Czech (primary) and English, with easy extensibility to any Whisper-supported language
+- **Multi-language** — Czech, Slovak, English, and Auto-detect, with easy extensibility to any Whisper-supported language
 - **WebSocket streaming protocol** — lightweight JSON control messages + binary PCM audio
 - **Exponential backoff reconnection** — automatic reconnection with progressive delays
 - **Comprehensive test coverage** — 90% coverage enforced on both frontend and backend
@@ -68,7 +68,7 @@ bun install
 ```
 
 The application will be available at:
-- **Frontend:** http://localhost:5173
+- **Frontend:** http://localhost:5173/stt
 - **Backend:** http://localhost:8765
 - **Health check:** http://localhost:8765/health
 
@@ -104,9 +104,9 @@ STT_MODEL_SIZE=medium STT_LANGUAGE=en make dev
 
 ## Usage
 
-1. Open http://localhost:5173 in your browser
+1. Open http://localhost:5173/stt in your browser
 2. Click **Connect** to establish a connection with the backend
-3. Select your language (CS or EN)
+3. Select your language (CS, SK, EN, or Auto)
 4. Click the microphone button to start recording
 5. Speak — partial transcriptions appear in real-time
 6. Click the microphone button again to stop — final transcription is committed

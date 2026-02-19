@@ -1,5 +1,6 @@
 <script>
 	import '../app.css';
+	import { base } from '$app/paths';
 	import { page } from '$app/state';
 
 	let { children } = $props();
@@ -8,8 +9,8 @@
 <h1 class="main-title">Speech to Text PoC, darek pro Nikolu :)</h1>
 
 <nav>
-	<a href="/" class:active={page.url.pathname === '/'}>Online</a>
-	<a href="/local" class:active={page.url.pathname.startsWith('/local')}>Local</a>
+	<a href="{base}/" class:active={page.url.pathname === `${base}/`}>Online</a>
+	<a href="{base}/local" class:active={page.url.pathname.startsWith(`${base}/local`)}>Local</a>
 </nav>
 
 {@render children()}
@@ -74,17 +75,40 @@
 		letter-spacing: -0.02em;
 		color: var(--mauve);
 		background: linear-gradient(135deg, rgba(203, 166, 247, 0.12), rgba(137, 180, 250, 0.08));
-		border: 1px solid rgba(203, 166, 247, 0.15);
+		border: 1px solid rgba(203, 166, 247, 0.25);
 		backdrop-filter: blur(12px);
 		border-radius: 16px;
 		padding: 20px 28px;
 		margin: 16px auto 0;
 		max-width: 640px;
 		width: calc(100% - 32px);
+		position: relative;
 		box-shadow:
-			0 4px 24px rgba(203, 166, 247, 0.08),
-			0 1px 2px rgba(0, 0, 0, 0.2),
+			0 0 10px rgba(203, 166, 247, 0.3),
+			0 0 30px rgba(203, 166, 247, 0.15),
+			0 0 60px rgba(137, 180, 250, 0.1),
 			inset 0 1px 0 rgba(203, 166, 247, 0.1);
+		animation: glow-pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+	}
+
+	@keyframes glow-pulse {
+		0%, 100% {
+			box-shadow:
+				0 0 10px rgba(203, 166, 247, 0.25),
+				0 0 30px rgba(203, 166, 247, 0.12),
+				0 0 60px rgba(137, 180, 250, 0.08),
+				inset 0 1px 0 rgba(203, 166, 247, 0.1);
+			border-color: rgba(203, 166, 247, 0.2);
+		}
+		50% {
+			box-shadow:
+				0 0 12px rgba(203, 166, 247, 0.4),
+				0 0 40px rgba(203, 166, 247, 0.2),
+				0 0 70px rgba(137, 180, 250, 0.15),
+				0 0 100px rgba(245, 194, 231, 0.08),
+				inset 0 1px 0 rgba(203, 166, 247, 0.15);
+			border-color: rgba(203, 166, 247, 0.35);
+		}
 	}
 
 	nav {

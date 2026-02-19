@@ -28,7 +28,7 @@ export class AudioCapture {
 
 		// AudioWorklet for PCM capture
 		await this.audioContext.audioWorklet.addModule(
-			new URL('./pcm-processor.worklet.ts', import.meta.url)
+			new URL('./pcm-processor.worklet.js', import.meta.url)
 		);
 		this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
 
