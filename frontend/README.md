@@ -87,6 +87,7 @@ src/lib/
 │   └── transcript.svelte.ts # Transcript entries with partial/final streaming
 │
 ├── components/         # UI components
+│   ├── FileUpload.svelte         # Audio file upload for batch transcription
 │   ├── LanguageSelector.svelte   # CS/EN language toggle
 │   ├── ModelStatus.svelte        # Server status + connect/retry button
 │   ├── SettingsPanel.svelte      # Server URL, chunk interval settings
@@ -110,6 +111,7 @@ src/lib/
 ├── ModelStatus         — Server connection status + connect/retry button
 ├── Waveform            — Real-time frequency visualization (canvas)
 ├── MicControl          — Start/stop recording button with pulse animation
+├── FileUpload          — Audio file upload for batch transcription
 └── TranscriptDisplay   — Transcript entries with timestamps, copy/clear
 ```
 
@@ -243,7 +245,7 @@ Every source file has a co-located `.test.ts` file. Global test setup is in `tes
 | `whisper/manager.ts` | `manager.test.ts` | Health check fetch, error handling, status callbacks |
 | `state/app.svelte.ts` | `app.svelte.test.ts` | State initialization, property updates, derived values |
 | `state/transcript.svelte.ts` | `transcript.svelte.test.ts` | Partial/final entry management, clearing, fullText |
-| `components/*.svelte` | `*.test.ts` | Rendering, user interaction, prop handling, accessibility |
+| `components/*.svelte` | `*.test.ts` | Rendering, user interaction, prop handling, accessibility (7 components) |
 | `utils/format.ts` | `format.test.ts` | Timestamp formatting, duration formatting, text cleaning |
 
 ### Mocks

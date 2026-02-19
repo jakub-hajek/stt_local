@@ -3,7 +3,9 @@
 
   const languages = [
     { code: 'cs' as const, label: 'CS' },
+    { code: 'sk' as const, label: 'SK' },
     { code: 'en' as const, label: 'EN' },
+    { code: 'auto' as const, label: 'Auto' },
   ];
 </script>
 

@@ -170,6 +170,7 @@
 	{#if interimText}
 		<div class="interim">{interimText}</div>
 	{/if}
+
 </main>
 
 <style>
@@ -270,4 +271,5 @@
 		font-size: 0.875rem;
 		border-left: 2px solid var(--surface1);
 	}
+
 </style>

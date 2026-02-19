@@ -1,13 +1,12 @@
 # STT Local — Backend
 
-FastAPI backend for real-time speech-to-text using [SimulStreaming](https://github.com/ufal/SimulStreaming) (UFAL) with the AlignAtt simultaneous decoding policy.
+FastAPI backend for real-time speech-to-text using [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) on Apple Silicon.
 
 ## Setup
 
 ### Prerequisites
 
 - Python 3.13.1 (via [pyenv](https://github.com/pyenv/pyenv))
-- Git (to clone SimulStreaming during setup)
 
 ### Installation
 
@@ -16,17 +15,7 @@ FastAPI backend for real-time speech-to-text using [SimulStreaming](https://gith
 make install-be
 ```
 
-This runs `backend/scripts/install_backend.sh`, which creates `backend/.venv`, installs backend dependencies (including `mps` extras automatically on Apple Silicon and `cuda` extras on Linux), clones `SimulStreaming` into the project root, installs `requirements_whisper.txt`, and patches `backend/.venv/bin/activate` to export the required `PYTHONPATH`.
-
-### Hardware-Specific Extras
-
-```bash
-# macOS Apple Silicon (MLX)
-pip install -e ".[mps]"
-
-# Linux CUDA
-pip install -e ".[cuda]"
-```
+This runs `backend/scripts/install_backend.sh`, which creates `backend/.venv` and installs all dependencies.
 
 ### Running
 
@@ -36,7 +25,7 @@ make dev-be
 
 # Or directly
 cd backend
-PYTHONPATH="../SimulStreaming:$PYTHONPATH" .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765 --log-level info
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765 --log-level info
 ```
 
 The server starts at http://localhost:8765.
@@ -49,16 +38,16 @@ All settings use the `STT_` prefix as environment variables, managed by Pydantic
 |---|---|---|---|
 | `STT_HOST` | `str` | `0.0.0.0` | Server bind address |
 | `STT_PORT` | `int` | `8765` | Server port |
-| `STT_MODEL_SIZE` | `str` | `large-v3-turbo` | Whisper model name or local path |
+| `STT_MODEL_SIZE` | `str` | `large-v3-turbo` | Whisper model short name (see config.py `MODEL_REPO_MAP`) |
 | `STT_LANGUAGE` | `str` | `cs` | Default language code |
-| `STT_CORS_ORIGINS` | `list[str]` | `["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:4173"]` | Allowed CORS origins |
+| `STT_CORS_ORIGINS` | `list[str]` | `["http://localhost:5173", ...]` | Allowed CORS origins |
 | `STT_LOG_LEVEL` | `str` | `info` | Python logging level (`debug`, `info`, `warning`, `error`) |
 
 Example:
 
 ```bash
-STT_MODEL_SIZE=medium STT_LANGUAGE=en STT_LOG_LEVEL=debug \
-  uvicorn app.main:app --port 8765
+STT_MODEL_SIZE=medium STT_LANGUAGE=en \
+  .venv/bin/uvicorn app.main:app --port 8765
 ```
 
 ## API Reference
@@ -75,6 +64,26 @@ Health check endpoint returning server status and engine information.
   "device": "mps",
   "model": "large-v3-turbo",
   "version": "0.1.0"
+}
+```
+
+### `POST /api/transcribe`
+
+File upload endpoint for batch transcription. Accepts audio files via multipart upload.
+
+**Request:**
+- `file` — audio file (WAV, MP3, FLAC, OGG, etc.)
+- `language` — language code (default: `cs`)
+
+**Response (200):**
+```json
+{
+  "text": "Transcribed text here",
+  "segments": [
+    { "text": "Transcribed", "start_ms": 0, "end_ms": 1200 },
+    { "text": "text here", "start_ms": 1200, "end_ms": 2400 }
+  ],
+  "duration_ms": 2400.0
 }
 ```
 
@@ -114,7 +123,7 @@ The WebSocket protocol uses JSON for control messages and binary frames for audi
 - Sample rate: 16,000 Hz, mono
 - Chunk size: 1,600 samples = 100ms = 3,200 bytes
 
-**5. Server sends partial results:**
+**5. Server sends partial results (every 2s of new audio):**
 ```json
 {
   "type": "partial",
@@ -158,52 +167,30 @@ All message schemas are defined as Pydantic models in `app/models.py`:
 
 ## Architecture
 
-### Engine Components
+### TranscriptionEngine (`app/engine/factory.py`)
 
-#### Backend Detection (`app/engine/detector.py`)
+Thread-safe singleton that manages the mlx-whisper model:
 
-Automatically detects the best available hardware backend:
-
-1. **macOS ARM64 + `mlx_whisper` importable** → `("mlx-whisper", "mps")`
-2. **`torch.cuda.is_available()` + `faster_whisper` importable** → `("faster-whisper", "cuda")`
-3. **Fallback** → `("faster-whisper", "cpu")`
-
-#### TranscriptionEngine (`app/engine/factory.py`)
-
-Thread-safe singleton that manages the ASR model lifecycle:
-
-- **Loads once** at application startup via SimulStreaming's `simul_asr_factory()`
-- **Creates per-session processors** for each WebSocket connection via `create_session()`
+- **Loads once** at startup via a warm-up transcription on silence
+- **Provides `transcribe(audio, language)`** — synchronous wrapper around `mlx_whisper.transcribe()`
+- **Provides `transcribe_async(audio, language)`** — runs transcription off the event loop via a single-thread executor (prevents Metal GPU memory corruption from concurrent access)
 - **Properties:** `is_loaded`, `model_size`, `backend`, `device`
 
 ```python
 engine = TranscriptionEngine.get_instance()
-engine.load(model_size="large-v3-turbo", language="cs", backend="mlx-whisper", device="mps")
-
-# Per WebSocket connection:
-session_processor = engine.create_session()
+engine.load(model_repo="mlx-community/whisper-large-v3-turbo", language="cs")
+result = engine.transcribe(audio_array)
 ```
 
-#### SessionProcessor (`app/engine/processor.py`)
+### WebSocket Streaming (`app/routes/websocket.py`)
 
-Wraps a `SimulWhisperOnline` instance for a single WebSocket session:
+Buffers audio and transcribes every 2 seconds of new data. Force-finalizes and resets the buffer at 30 seconds.
 
-```python
-processor = SessionProcessor(engine.create_session())
+### File Upload (`app/routes/upload.py`)
 
-# Feed audio chunks → get partial results
-partials = processor.feed_audio(float32_array)
-# Returns: [(text, start_ms, end_ms), ...]
+Decodes audio with librosa, calls `engine.transcribe_async()`, and converts segment times from seconds to milliseconds.
 
-# At end of speech → get final results
-finals = processor.flush()
-# Returns: [(text, start_ms, end_ms), ...]
-```
-
-- Converts timestamps from seconds (SimulStreaming) to milliseconds (protocol)
-- Filters out empty/whitespace-only results
-
-#### Audio Normalizer (`app/audio/normalizer.py`)
+### Audio Normalizer (`app/audio/normalizer.py`)
 
 Converts raw PCM bytes from WebSocket to NumPy arrays:
 
@@ -213,37 +200,6 @@ from app.audio.normalizer import pcm_to_float32
 float32_audio = pcm_to_float32(raw_bytes)
 # Input:  bytes (int16 little-endian PCM)
 # Output: np.ndarray float32 in range [-1.0, 1.0]
-```
-
-### Request Lifecycle
-
-```
-WebSocket Connect
-       │
-       ▼
-Accept connection
-Send ConnectedMessage (backend, device, model info)
-       │
-       ▼
-Receive ConfigureMessage (language)
-Create SessionProcessor for this connection
-Send ReadyMessage
-       │
-       ▼
-┌─── Audio Loop ────────────────────────┐
-│  Receive binary frame (PCM s16le)     │
-│  pcm_to_float32() → float32 array    │
-│  processor.feed_audio() → partials   │
-│  Send PartialResult for each result   │
-│  ◄────────────────────────────────────┘
-       │
-       ▼ (on "stop" message)
-processor.flush() → final results
-Send FinalResult for each result
-Send DoneMessage
-       │
-       ▼
-Close connection
 ```
 
 ## Testing
@@ -262,18 +218,17 @@ cd backend && .venv/bin/pytest --cov=app --cov-report=term-missing
 
 ### Test Structure
 
-| Test File | Covers | Tests |
-|---|---|---|
-| `test_detector.py` | `app/engine/detector.py` | 8 tests — all backend detection paths (MPS, CUDA, CPU) |
-| `test_factory.py` | `app/engine/factory.py` | 7 tests — singleton behavior, model loading, double-load warning |
-| `test_normalizer.py` | `app/audio/normalizer.py` | 6 tests — PCM int16 → float32 conversion accuracy |
-| `test_processor.py` | `app/engine/processor.py` | 23 tests — result parsing (dict/tuple/None), feed/flush behavior |
-| `test_websocket.py` | `app/routes/websocket.py` | 13 tests — handshake, audio flow, error handling |
-| `test_main.py` | `app/main.py` | App startup/shutdown lifecycle |
+| Test File | Covers |
+|---|---|
+| `test_factory.py` | `app/engine/factory.py` — singleton behavior, model loading, transcription |
+| `test_normalizer.py` | `app/audio/normalizer.py` — PCM int16 → float32 conversion |
+| `test_websocket.py` | `app/routes/websocket.py` — handshake, audio flow, error handling |
+| `test_upload.py` | `app/routes/upload.py` — file upload, decoding, error cases |
+| `test_main.py` | `app/main.py` — app startup/shutdown lifecycle |
 
 ### Mocking Strategy
 
-The `tests/conftest.py` provides an autouse fixture that creates a fake `simulstreaming_whisper` module with a `_MockOnlineProcessor` class. This allows tests to run without the heavy ML dependencies (PyTorch models, SimulStreaming).
+The `tests/conftest.py` provides an autouse fixture that stubs the `mlx_whisper` module so tests run without ML dependencies.
 
 ### Coverage
 
@@ -289,17 +244,10 @@ Coverage threshold is set to **90%** (`fail_under = 90` in `pyproject.toml`). Th
 | `uvicorn[standard]` | ASGI server |
 | `websockets` | WebSocket protocol implementation |
 | `numpy` | Audio array processing |
-| `torch` | GPU detection, tensor operations |
-| `torchaudio` | Audio processing utilities |
-| `librosa` | Audio analysis |
+| `mlx-whisper` | Whisper inference on Apple Silicon |
+| `librosa` | Audio file decoding and resampling |
 | `pydantic-settings` | Environment-based configuration |
-
-### Optional
-
-| Extra | Package | Purpose |
-|---|---|---|
-| `mps` | `mlx-whisper` | macOS Apple Silicon acceleration |
-| `cuda` | `faster-whisper` | NVIDIA GPU acceleration |
+| `python-multipart` | File upload support |
 
 ### Development
 

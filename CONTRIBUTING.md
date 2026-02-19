@@ -9,31 +9,32 @@
 | pyenv | latest | [pyenv installer](https://github.com/pyenv/pyenv#installation) |
 | Python | 3.13.1 | `pyenv install 3.13.1` (auto-selected via `.python-version`) |
 | Bun | latest | [bun.sh](https://bun.sh/) |
-| SimulStreaming | latest | `git clone https://github.com/ufal/SimulStreaming.git` |
 
 ### First-Time Setup
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url> stt_local
+git clone https://github.com/jakub-hajek/stt_local.git
 cd stt_local
 
-# 2. Backend
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# 2. Install all dependencies
+make install
 
-# 3. SimulStreaming
-git clone https://github.com/ufal/SimulStreaming.git /path/to/SimulStreaming
-export PYTHONPATH="/path/to/SimulStreaming:$PYTHONPATH"
-pip install -r /path/to/SimulStreaming/requirements_whisper.txt
+# 3. Verify everything works
+make test
+```
 
-# 4. Frontend
-cd ../frontend
+Or step by step:
+
+```bash
+# Backend
+make install-be   # Creates venv + installs deps
+
+# Frontend
+cd frontend
 bun install
 
-# 5. Verify everything works
+# Verify
 cd ..
 make test
 ```
@@ -77,11 +78,11 @@ make check   # Frontend TypeScript checking via svelte-check
 
 - **`app/`** — Application source code
   - `main.py` — FastAPI app setup, CORS, lifespan handler
-  - `config.py` — Pydantic Settings with `STT_` env prefix
+  - `config.py` — Pydantic Settings with `STT_` env prefix, `MODEL_REPO_MAP`
   - `models.py` — WebSocket protocol Pydantic schemas
-  - `routes/` — HTTP and WebSocket route handlers
-  - `engine/` — Transcription engine (detection, factory, session processor)
-  - `audio/` — Audio processing utilities
+  - `routes/` — HTTP and WebSocket route handlers (`health.py`, `upload.py`, `websocket.py`)
+  - `engine/` — Transcription engine (`factory.py` — singleton mlx-whisper wrapper)
+  - `audio/` — Audio processing utilities (`normalizer.py`)
 - **`tests/`** — pytest test suite
 
 ### Frontend (`frontend/`)
@@ -90,7 +91,7 @@ make check   # Frontend TypeScript checking via svelte-check
   - `audio/` — AudioWorklet capture, PCM processing, silence detection
   - `whisper/` — WebSocket client, health checking, protocol types
   - `state/` — Svelte 5 reactive state stores
-  - `components/` — Svelte UI components
+  - `components/` — Svelte UI components (7 total)
   - `theme/` — Color palette
   - `utils/` — Formatting utilities
 - **`src/routes/`** — SvelteKit pages
@@ -106,7 +107,7 @@ Both frontend and backend enforce a **90% coverage threshold**. PRs that drop co
 
 - All test files go in `backend/tests/`
 - Use `pytest-asyncio` for async tests (auto mode enabled)
-- The `conftest.py` autouse fixture mocks SimulStreaming, so tests don't require ML dependencies
+- The `conftest.py` autouse fixture mocks `mlx_whisper`, so tests don't require ML dependencies
 - Use `httpx.AsyncClient` for HTTP endpoint testing
 
 ```python
@@ -163,7 +164,7 @@ When modifying the WebSocket protocol:
 2. Update TypeScript types in `frontend/src/lib/whisper/types.ts`
 3. Update the WebSocket handler in `backend/app/routes/websocket.py`
 4. Update the Transcriber client in `frontend/src/lib/whisper/transcriber.ts`
-5. Update protocol documentation in `ARCHITECTURE.md`
+5. Update protocol documentation in `ARCHITECTURE.md` and `API.md`
 6. Add tests for both backend and frontend
 
 ## Adding a New Language
@@ -178,23 +179,8 @@ When modifying the WebSocket protocol:
 ### "Python venv not found"
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+make install-be
 ```
-
-### "SimulStreaming module not found"
-
-Ensure SimulStreaming is on your `PYTHONPATH`:
-
-```bash
-export PYTHONPATH="/path/to/SimulStreaming:$PYTHONPATH"
-```
-
-### "Backend did not respond within 30s" on startup
-
-The first startup may take longer as the Whisper model downloads. Check backend logs for download progress.
 
 ### Tests fail with import errors
 
@@ -202,8 +188,12 @@ Ensure you've installed dev dependencies:
 
 ```bash
 # Backend
-cd backend && pip install -e ".[dev]"
+make install-be
 
 # Frontend
 cd frontend && bun install
 ```
+
+### "Backend did not respond within 30s" on startup
+
+The first startup may take longer as the Whisper model downloads from HuggingFace. Check backend logs for download progress.

@@ -1,7 +1,5 @@
 <script lang="ts">
   import { transcriptState } from '$lib/state/transcript.svelte';
-  import { formatTimestamp } from '$lib/utils/format';
-
   let copied = $state(false);
 
   async function copyAll() {
@@ -46,7 +44,7 @@
     {:else}
       {#each transcriptState.entries as entry (entry.id)}
         <div class="transcript-entry">
-          <span class="timestamp">{formatTimestamp(entry.timestamp)}</span>
+          <span class="timestamp">{new Date(entry.timestamp).toLocaleTimeString()}</span>
           <span class="entry-text">{entry.text}</span>
         </div>
       {/each}

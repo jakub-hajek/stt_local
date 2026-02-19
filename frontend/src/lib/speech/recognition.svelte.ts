@@ -36,6 +36,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
 const LANG_MAP: Record<Language, string> = {
 	cs: 'cs-CZ',
+	sk: 'sk-SK',
 	en: 'en-US',
 	auto: '',
 };
@@ -92,14 +93,19 @@ export class SpeechRecognitionService {
 		recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
 			if (event.error === 'aborted') return;
 			this.error = event.error;
+			// Only stop permanently for permission denial — all other errors
+			// let onend handle the automatic restart.
 			if (event.error === 'not-allowed') {
-				this.stop();
+				this.shouldRestart = false;
 			}
 		};
 
 		recognition.onend = () => {
-			// Session ended — clear interim (it was never confirmed)
-			this.interimText = '';
+			// Flush any pending interim text as final before restarting
+			if (this.interimText) {
+				this.onFinal(this.interimText);
+				this.interimText = '';
+			}
 			if (this.shouldRestart) {
 				this.emittedFinalCount = 0;
 				try {

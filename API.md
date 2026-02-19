@@ -40,8 +40,8 @@ Host: localhost:8765
 | Field | Type | Description |
 |---|---|---|
 | `status` | `string` | Always `"ok"` when the server is running |
-| `backend` | `string` | ASR backend: `"mlx-whisper"` or `"faster-whisper"` |
-| `device` | `string` | Compute device: `"mps"`, `"cuda"`, or `"cpu"` |
+| `backend` | `string` | ASR backend: `"mlx-whisper"` |
+| `device` | `string` | Compute device: `"mps"` |
 | `model` | `string` | Loaded Whisper model name |
 | `version` | `string` | Application version |
 
@@ -49,6 +49,74 @@ Host: localhost:8765
 - Check if the backend is running before establishing WebSocket
 - Display server configuration in the UI
 - Monitoring and healthcheck integrations
+
+---
+
+### `POST /api/transcribe`
+
+File upload endpoint for batch audio transcription. Accepts audio files via multipart form upload.
+
+**Request:**
+```
+POST /api/transcribe HTTP/1.1
+Content-Type: multipart/form-data
+
+file: <audio file>
+language: cs
+```
+
+**Form Fields:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file` | file | yes | — | Audio file (WAV, MP3, FLAC, OGG, etc.) |
+| `language` | string | no | `cs` | Language code for transcription |
+
+**Response (200 OK):**
+```json
+{
+  "text": "Ahoj světe jak se máš",
+  "segments": [
+    {
+      "text": "Ahoj světe",
+      "start_ms": 0,
+      "end_ms": 1860
+    },
+    {
+      "text": "jak se máš",
+      "start_ms": 1860,
+      "end_ms": 3200
+    }
+  ],
+  "duration_ms": 3200.0
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `text` | `string` | Full transcribed text (all segments joined) |
+| `segments` | `array` | Array of segment objects with timing |
+| `segments[].text` | `string` | Segment text |
+| `segments[].start_ms` | `int` | Segment start time in milliseconds |
+| `segments[].end_ms` | `int` | Segment end time in milliseconds |
+| `duration_ms` | `float` | Total audio duration in milliseconds |
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| 400 | Empty file or undecodable audio format |
+| 500 | Transcription engine error |
+| 503 | Engine not loaded (server starting up) |
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:8765/api/transcribe \
+  -F "file=@recording.wav" \
+  -F "language=cs"
+```
 
 ---
 
@@ -80,7 +148,7 @@ Phase 2: Configuration
 
 Phase 3: Streaming (repeats)
   Client  ──── Binary PCM audio ────────────>  Server
-  Client  <─── PartialResult ──────────────  Server
+  Client  <─── PartialResult ──────────────  Server  (every 2s of new audio)
 
 Phase 4: Finalization
   Client  ──── StopMessage ─────────────────>  Server
@@ -100,6 +168,12 @@ All binary WebSocket frames must contain PCM audio in the following format:
 | Recommended chunk | 1,600 samples = 100ms = 3,200 bytes |
 
 The backend converts received PCM int16 to float32 internally via `pcm_to_float32()`.
+
+### Buffering Behavior
+
+- Audio is buffered and transcribed every **2 seconds** of new data (partial results)
+- At **30 seconds** of buffered audio, the buffer is force-finalized and reset
+- On `stop`, the remaining buffer is transcribed as final results
 
 ---
 
@@ -123,8 +197,8 @@ Sent immediately after the WebSocket connection is accepted. Contains server cap
 | Field | Type | Description |
 |---|---|---|
 | `type` | `"connected"` | Message type identifier |
-| `backend` | `string` | ASR backend name (`"mlx-whisper"`, `"faster-whisper"`) |
-| `device` | `string` | Compute device (`"mps"`, `"cuda"`, `"cpu"`) |
+| `backend` | `string` | ASR backend name (`"mlx-whisper"`) |
+| `device` | `string` | Compute device (`"mps"`) |
 | `model` | `string` | Loaded Whisper model name or path |
 
 #### ReadyMessage
@@ -143,7 +217,7 @@ Sent after the server processes a `ConfigureMessage`. The session is now ready t
 
 #### PartialResult
 
-Intermediate transcription result. May change as more audio is processed. Sent during streaming as the AlignAtt policy emits text.
+Intermediate transcription result. Sent every 2 seconds of new audio. May change as more audio is processed.
 
 ```json
 {
@@ -158,8 +232,8 @@ Intermediate transcription result. May change as more audio is processed. Sent d
 |---|---|---|
 | `type` | `"partial"` | Message type identifier |
 | `text` | `string` | Transcribed text (may change in subsequent partials) |
-| `start_ms` | `float` | Segment start time in milliseconds |
-| `end_ms` | `float` | Segment end time in milliseconds |
+| `start_ms` | `int` | Segment start time in milliseconds |
+| `end_ms` | `int` | Segment end time in milliseconds |
 
 #### FinalResult
 
@@ -178,8 +252,8 @@ Committed transcription result after the client sends a `StopMessage`. This text
 |---|---|---|
 | `type` | `"final"` | Message type identifier |
 | `text` | `string` | Final transcribed text |
-| `start_ms` | `float` | Segment start time in milliseconds |
-| `end_ms` | `float` | Segment end time in milliseconds |
+| `start_ms` | `int` | Segment start time in milliseconds |
+| `end_ms` | `int` | Segment end time in milliseconds |
 
 #### DoneMessage
 
@@ -217,7 +291,7 @@ Configures the transcription session. Must be sent after receiving `ConnectedMes
 
 #### StopMessage
 
-Signals the end of the audio stream. The server will flush remaining audio, emit final results, and send a `DoneMessage`.
+Signals the end of the audio stream. The server will transcribe remaining audio, emit final results, and send a `DoneMessage`.
 
 ```json
 {
@@ -326,20 +400,16 @@ async def transcribe():
 asyncio.run(transcribe())
 ```
 
-### cURL Health Check
+### File Upload (cURL)
 
 ```bash
-curl -s http://localhost:8765/health | python -m json.tool
-```
+# Transcribe an audio file
+curl -X POST http://localhost:8765/api/transcribe \
+  -F "file=@recording.wav" \
+  -F "language=cs"
 
-```json
-{
-    "status": "ok",
-    "backend": "mlx-whisper",
-    "device": "mps",
-    "model": "large-v3-turbo",
-    "version": "0.1.0"
-}
+# Health check
+curl -s http://localhost:8765/health | python -m json.tool
 ```
 
 ---
@@ -360,17 +430,20 @@ The server closes the WebSocket connection in case of errors:
 
 | Status | Condition |
 |---|---|
-| 200 | Health check successful |
+| 200 | Success |
+| 400 | Empty file or undecodable audio (file upload) |
+| 500 | Transcription engine error |
 | 503 | Server starting up (engine not yet loaded) |
 
 ---
 
 ## CORS Configuration
 
-The backend allows cross-origin requests from configured origins (default: `http://localhost:5173` and `http://localhost:4173`).
+The backend allows cross-origin requests from configured origins (default: `http://localhost:5173` and related dev ports).
 
 Configurable via:
 
 ```bash
-STT_CORS_ORIGINS='["http://localhost:3000","https://myapp.com"]' uvicorn app.main:app
+STT_CORS_ORIGINS='["http://localhost:3000","https://myapp.com"]' \
+  uvicorn app.main:app
 ```

@@ -2,21 +2,19 @@
 
 Privacy-first, real-time speech-to-text running entirely on your machine. No cloud, no data leaves your device.
 
-Built with a **FastAPI + SimulStreaming** backend and a **SvelteKit** frontend, STT Local delivers low-latency streaming transcription using the AlignAtt simultaneous decoding policy from [UFAL SimulStreaming](https://github.com/ufal/SimulStreaming).
+Built with a **FastAPI + mlx-whisper** backend and a **SvelteKit** frontend, STT Local delivers low-latency streaming transcription on macOS Apple Silicon.
 
 ## Features
 
 - **Real-time streaming transcription** — partial results appear as you speak, finalized when you stop
 - **Privacy-first** — all processing happens locally; audio never leaves your machine
-- **Multi-backend support** — automatic hardware detection:
-  - `mlx-whisper` on macOS Apple Silicon (MPS)
-  - `faster-whisper` on Linux with CUDA
-  - CPU fallback everywhere else
+- **Apple Silicon acceleration** — uses mlx-whisper for fast inference on MPS
+- **File upload transcription** — upload audio files (WAV, MP3, FLAC, OGG, etc.) for batch transcription
 - **Live waveform visualization** — real-time frequency display via Canvas + AnalyserNode
 - **Multi-language** — Czech (primary) and English, with easy extensibility to any Whisper-supported language
 - **WebSocket streaming protocol** — lightweight JSON control messages + binary PCM audio
 - **Exponential backoff reconnection** — automatic reconnection with progressive delays
-- **Comprehensive test coverage** — 185+ tests across frontend and backend, >90% coverage enforced
+- **Comprehensive test coverage** — 90% coverage enforced on both frontend and backend
 
 ## Architecture
 
@@ -24,13 +22,12 @@ Built with a **FastAPI + SimulStreaming** backend and a **SvelteKit** frontend, 
 Browser (SvelteKit)                    Backend (FastAPI + uvicorn)
 ┌────────────────────┐                 ┌──────────────────────────────┐
 │ Mic → AudioWorklet │                 │ GET  /health                 │
-│ (PCM 16kHz s16le)  │──WebSocket──▶   │ WS   /ws/transcribe          │
-│                    │                 │                              │
-│ Transcript UI      │◀──WS JSON────   │ SimulStreaming engine         │
-│ Waveform (local)   │                 │  macOS ARM64 → mlx-whisper   │
-└────────────────────┘                 │  Linux CUDA  → faster-whisper│
-                                       │  fallback    → CPU           │
-                                       └──────────────────────────────┘
+│ (PCM 16kHz s16le)  │──WebSocket──▶   │ POST /api/transcribe         │
+│                    │                 │ WS   /ws/transcribe          │
+│ File Upload        │──HTTP POST──▶   │                              │
+│ Transcript UI      │◀──JSON──────   │ mlx-whisper engine           │
+│ Waveform (local)   │                 │  macOS ARM64 → MPS           │
+└────────────────────┘                 └──────────────────────────────┘
 ```
 
 ## Quick Start
@@ -41,71 +38,39 @@ Browser (SvelteKit)                    Backend (FastAPI + uvicorn)
 |---|---|---|
 | Python | 3.13.1 | Managed via [pyenv](https://github.com/pyenv/pyenv) (pinned in `.python-version`) |
 | Bun | latest | Or Node.js 20+ for the SvelteKit frontend |
-| Git | latest | Required to clone SimulStreaming during backend install |
 
 ### Installation
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url> stt_local
+git clone https://github.com/jakub-hajek/stt_local.git
 cd stt_local
 
-# 2. Backend setup
-make install-be
+# 2. Install all dependencies (frontend + backend)
+make install
 
-# 3. Frontend setup
+# 3. Start both servers
+make dev
+```
+
+Or step by step:
+
+```bash
+# Backend setup
+make install-be   # Creates venv, installs deps
+
+# Frontend setup
 cd frontend
 bun install
 
-# 4. Start both services
-cd ..
+# Start both services
 ./start.sh
-```
-
-Or use the Makefile:
-
-```bash
-make install   # Install both frontend + backend dependencies
-make dev       # Start both servers
 ```
 
 The application will be available at:
 - **Frontend:** http://localhost:5173
 - **Backend:** http://localhost:8765
 - **Health check:** http://localhost:8765/health
-
-### SimulStreaming Setup
-
-`make install-be` now bootstraps SimulStreaming automatically:
-
-```bash
-# Runs backend/scripts/install_backend.sh:
-# - creates backend/.venv (if missing)
-# - installs backend deps (auto-adds mps extra on Apple Silicon, cuda extra on Linux)
-# - clones SimulStreaming into ./SimulStreaming (project root)
-# - installs SimulStreaming requirements_whisper.txt
-# - patches backend/.venv/bin/activate to export PYTHONPATH with ./SimulStreaming
-make install-be
-```
-
-If your venv is already active after installation, reload it:
-
-```bash
-deactivate
-source backend/.venv/bin/activate
-```
-
-### Hardware-Specific Installation
-
-```bash
-# macOS Apple Silicon (MLX acceleration)
-cd backend && pip install -e ".[mps]"
-
-# Linux with NVIDIA GPU (CUDA acceleration)
-cd backend && pip install -e ".[cuda]"
-
-# CPU-only (no extra install needed — automatic fallback)
-```
 
 ## Configuration
 
@@ -115,15 +80,26 @@ All backend settings use the `STT_` prefix as environment variables:
 |---|---|---|
 | `STT_HOST` | `0.0.0.0` | Server bind address |
 | `STT_PORT` | `8765` | Server port |
-| `STT_MODEL_SIZE` | `large-v3-turbo` | Whisper model name or path |
+| `STT_MODEL_SIZE` | `large-v3-turbo` | Whisper model name (see Model Sizes below) |
 | `STT_LANGUAGE` | `cs` | Default language code |
-| `STT_CORS_ORIGINS` | `["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:4173"]` | Allowed CORS origins |
+| `STT_CORS_ORIGINS` | `["http://localhost:5173", ...]` | Allowed CORS origins |
 | `STT_LOG_LEVEL` | `info` | Python logging level |
+
+### Model Sizes
+
+| Short Name | HuggingFace Repo |
+|---|---|
+| `tiny` | `mlx-community/whisper-tiny` |
+| `base` | `mlx-community/whisper-base` |
+| `small` | `mlx-community/whisper-small` |
+| `medium` | `mlx-community/whisper-medium` |
+| `large` / `large-v3` | `mlx-community/whisper-large-v3` |
+| `large-v3-turbo` | `mlx-community/whisper-large-v3-turbo` |
 
 Example:
 
 ```bash
-STT_MODEL_SIZE=large-v3 STT_LANGUAGE=en ./start.sh
+STT_MODEL_SIZE=medium STT_LANGUAGE=en make dev
 ```
 
 ## Usage
@@ -134,7 +110,8 @@ STT_MODEL_SIZE=large-v3 STT_LANGUAGE=en ./start.sh
 4. Click the microphone button to start recording
 5. Speak — partial transcriptions appear in real-time
 6. Click the microphone button again to stop — final transcription is committed
-7. Use the **Copy** button to copy the transcript to clipboard, or **Clear** to reset
+7. Or use **File Upload** to transcribe an audio file
+8. Use the **Copy** button to copy the transcript to clipboard, or **Clear** to reset
 
 ## Testing
 
@@ -142,10 +119,10 @@ STT_MODEL_SIZE=large-v3 STT_LANGUAGE=en ./start.sh
 # Run all tests (frontend + backend)
 make test
 
-# Frontend only (129+ tests, Vitest + jsdom)
+# Frontend only (Vitest + jsdom)
 make test-fe
 
-# Backend only (57+ tests, pytest + pytest-asyncio)
+# Backend only (pytest + pytest-asyncio)
 make test-be
 
 # Coverage reports
@@ -161,24 +138,26 @@ stt_local/
 ├── start.sh                     # Launch both backend + frontend
 ├── Makefile                     # Build, test, and development tasks
 ├── ARCHITECTURE.md              # Detailed architecture & developer guide
+├── API.md                       # Full API reference
 ├── README.md                    # This file
 │
 ├── backend/                     # Python FastAPI backend
 │   ├── pyproject.toml           # Dependencies, pytest config, coverage
+│   ├── scripts/
+│   │   └── install_backend.sh   # Automated venv + deps setup
 │   ├── app/
 │   │   ├── main.py              # FastAPI app, CORS, lifespan handler
-│   │   ├── config.py            # Pydantic Settings (STT_* env vars)
+│   │   ├── config.py            # Pydantic Settings (STT_* env vars), model repo map
 │   │   ├── models.py            # WebSocket protocol Pydantic schemas
 │   │   ├── routes/
 │   │   │   ├── health.py        # GET /health
+│   │   │   ├── upload.py        # POST /api/transcribe (file upload)
 │   │   │   └── websocket.py     # WS /ws/transcribe
 │   │   ├── engine/
-│   │   │   ├── detector.py      # Auto-detect MPS/CUDA/CPU
-│   │   │   ├── factory.py       # Singleton TranscriptionEngine
-│   │   │   └── processor.py     # Per-session SessionProcessor
+│   │   │   └── factory.py       # Singleton TranscriptionEngine (mlx-whisper)
 │   │   └── audio/
 │   │       └── normalizer.py    # PCM int16 → float32
-│   └── tests/                   # 57+ pytest tests
+│   └── tests/                   # pytest test suite
 │
 ├── frontend/                    # SvelteKit + TypeScript frontend
 │   ├── package.json
@@ -189,7 +168,7 @@ stt_local/
 │   │       ├── audio/           # AudioWorklet capture + PCM processing
 │   │       ├── whisper/         # WebSocket client + health check
 │   │       ├── state/           # Svelte 5 reactive state ($state)
-│   │       ├── components/      # UI components (6 total)
+│   │       ├── components/      # UI components (7 total)
 │   │       ├── theme/           # Catppuccin color palette
 │   │       └── utils/           # Formatting utilities
 │   └── tests/                   # Test setup + mocks
@@ -217,10 +196,10 @@ stt_local/
 - **Python 3.13** — Runtime
 - **FastAPI** — Web framework with WebSocket support
 - **Uvicorn** — ASGI server
+- **mlx-whisper** — Whisper inference on Apple Silicon (MPS)
 - **Pydantic** — Data validation and settings management
 - **NumPy** — Audio array processing
-- **PyTorch** — GPU detection and tensor operations
-- **SimulStreaming (UFAL)** — Real-time ASR with AlignAtt attention streaming
+- **librosa** — Audio file decoding and resampling
 
 ### Frontend
 - **SvelteKit 2** — Meta-framework with static adapter
@@ -232,72 +211,12 @@ stt_local/
 
 ## API Reference
 
-### REST Endpoints
-
-#### `GET /health`
-
-Returns server status and configuration.
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "backend": "mlx-whisper",
-  "device": "mps",
-  "model": "large-v3-turbo",
-  "version": "0.1.0"
-}
-```
-
-### WebSocket Protocol
-
-#### `WS /ws/transcribe`
-
-Full-duplex streaming transcription endpoint.
-
-**Connection flow:**
-
-```
-Client                          Server
-  |--- WS Connect ────────────────>|
-  |<── connected (server info)     |
-  |─── configure (language)  ─────>|
-  |<── ready                       |
-  |─── [binary PCM audio]   ─────>|  (repeat)
-  |<── partial results             |  (repeat)
-  |─── stop                  ─────>|
-  |<── final results               |
-  |<── done                        |
-```
-
-**Audio format:**
-- Sample rate: 16,000 Hz
-- Encoding: signed 16-bit integer, little-endian (s16le)
-- Channels: mono
-- Chunk size: 1,600 samples = 100ms = 3,200 bytes
-
-**Server messages:**
-
-| Type | Fields | Description |
-|---|---|---|
-| `connected` | `backend`, `device`, `model` | Server info after connection |
-| `ready` | — | Session configured, ready for audio |
-| `partial` | `text`, `start_ms`, `end_ms` | Intermediate result (may change) |
-| `final` | `text`, `start_ms`, `end_ms` | Committed result (won't change) |
-| `done` | — | Transcription segment complete |
-
-**Client messages:**
-
-| Type | Fields | Description |
-|---|---|---|
-| `configure` | `language` | Set session language (`cs`, `en`, `auto`) |
-| `stop` | — | End audio stream, request final results |
-| *(binary)* | PCM s16le bytes | Audio data (sent as binary WebSocket frame) |
+See [API.md](API.md) for the full API reference, including REST endpoints, WebSocket protocol, and message schemas.
 
 ## Further Reading
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Detailed architecture, engine internals, SimulStreaming API reference, AlignAtt policy explanation, and developer guide
-- [backend/README.md](backend/README.md) — Backend-specific setup, API details, and engine documentation
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Detailed architecture and developer guide
+- [backend/README.md](backend/README.md) — Backend-specific setup and engine documentation
 - [frontend/README.md](frontend/README.md) — Frontend-specific setup, component guide, and audio pipeline details
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Contributing guidelines, code style, and development workflow
 

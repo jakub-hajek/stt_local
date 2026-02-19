@@ -57,7 +57,7 @@ Browser mic → AudioWorklet (16kHz PCM s16le) → WebSocket binary frames → F
 - **Singleton engine pattern**: `TranscriptionEngine` (factory.py) loads the mlx-whisper model once at startup via a warm-up transcription. Provides `engine.transcribe(audio, language)` wrapping `mlx_whisper.transcribe()`.
 - **Model repo mapping** (config.py): `MODEL_REPO_MAP` maps short names (`tiny`, `large-v3-turbo`) to HuggingFace repos (`mlx-community/whisper-tiny`, etc.). `get_model_repo()` helper resolves them.
 - **WebSocket protocol** (routes/websocket.py): `connected` → `configure` → `ready` → binary audio / `partial` results → `stop` → `final` results → `done`. Buffers audio and transcribes every 2s of new data. Force-finalizes at 30s.
-- **File upload** (routes/upload.py): Decodes audio with librosa, calls `engine.transcribe()` once in a thread, converts segment times (seconds → ms).
+- **File upload** (routes/upload.py): `POST /api/transcribe` — decodes audio with librosa, calls `engine.transcribe_async()`, converts segment times (seconds → ms).
 - **Audio normalization** (audio/normalizer.py): `pcm_to_float32()` converts int16 LE bytes to float32 numpy array.
 - **Config**: Pydantic Settings with `STT_` env prefix (config.py). Key vars: `STT_MODEL_SIZE`, `STT_LANGUAGE`, `STT_PORT`.
 

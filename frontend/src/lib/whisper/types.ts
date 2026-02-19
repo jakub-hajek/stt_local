@@ -1,4 +1,4 @@
-export type Language = 'cs' | 'en' | 'auto';
+export type Language = 'cs' | 'sk' | 'en' | 'auto';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'ready' | 'error';
 
