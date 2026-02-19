@@ -184,7 +184,7 @@ result = engine.transcribe(audio_array)
 
 ### WebSocket Streaming (`app/routes/websocket.py`)
 
-Buffers audio and transcribes every 2 seconds of new data. Force-finalizes and resets the buffer at 30 seconds.
+Buffers audio and transcribes every 2 seconds of new data. Force-finalizes and resets the buffer at 5 seconds.
 
 ### File Upload (`app/routes/upload.py`)
 

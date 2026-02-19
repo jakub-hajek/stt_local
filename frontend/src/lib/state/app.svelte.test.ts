@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { appState } from './app.svelte';
 
 describe('AppState', () => {
@@ -79,6 +79,37 @@ describe('AppState', () => {
 		expect(appState.modelError).toBe('Something went wrong');
 		appState.setModelError(null);
 		expect(appState.modelError).toBeNull();
+	});
+
+	describe('error auto-clear', () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it('clears error status after 3 seconds', () => {
+			appState.setModelError('Connection failed');
+			appState.setModelStatus('error');
+			expect(appState.modelStatus).toBe('error');
+
+			vi.advanceTimersByTime(3000);
+			expect(appState.modelStatus).toBe('idle');
+			expect(appState.modelError).toBeNull();
+		});
+
+		it('clears server_offline status after 3 seconds', () => {
+			appState.setModelStatus('server_offline');
+			expect(appState.modelStatus).toBe('server_offline');
+
+			vi.advanceTimersByTime(3000);
+			expect(appState.modelStatus).toBe('idle');
+		});
+
+		it('cancels auto-clear when status changes to non-error', () => {
+			appState.setModelStatus('error');
+			appState.setModelStatus('ready');
+
+			vi.advanceTimersByTime(3000);
+			expect(appState.modelStatus).toBe('ready');
+		});
 	});
 
 	it('setConnectionStatus updates connectionStatus', () => {

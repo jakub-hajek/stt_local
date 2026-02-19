@@ -15,7 +15,13 @@ export class AudioCapture {
 	}
 
 	async start(): Promise<void> {
-		this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+		this.stream = await navigator.mediaDevices.getUserMedia({
+			audio: {
+				noiseSuppression: true,
+				echoCancellation: true,
+				autoGainControl: true,
+			},
+		});
 
 		// 16 kHz context — the browser resamples for us
 		this.audioContext = new AudioContext({ sampleRate: 16000 });

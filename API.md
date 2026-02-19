@@ -172,7 +172,7 @@ The backend converts received PCM int16 to float32 internally via `pcm_to_float3
 ### Buffering Behavior
 
 - Audio is buffered and transcribed every **2 seconds** of new data (partial results)
-- At **30 seconds** of buffered audio, the buffer is force-finalized and reset
+- At **5 seconds** of buffered audio, the buffer is force-finalized and reset
 - On `stop`, the remaining buffer is transcribed as final results
 
 ---

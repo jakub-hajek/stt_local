@@ -144,7 +144,7 @@ export class SpeechRecognitionService {
 	stop() {
 		this.shouldRestart = false;
 		this.isListening = false;
-		this.interimText = '';
+		// Don't clear interimText here — let onend flush it as final
 		this.recognition?.stop();
 	}
 }

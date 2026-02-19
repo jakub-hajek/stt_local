@@ -8,6 +8,7 @@ class AppState {
 	modelStatus: ModelStatus = $state('idle');
 	modelError: string | null = $state(null);
 	settingsOpen: boolean = $state(false);
+	private errorTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Server connection state
 	connectionStatus: ConnectionStatus = $state('disconnected');
@@ -38,10 +39,31 @@ class AppState {
 
 	setModelStatus(status: ModelStatus) {
 		this.modelStatus = status;
+		if (status === 'error' || status === 'server_offline') {
+			this.scheduleErrorClear();
+		} else {
+			this.clearErrorTimer();
+		}
 	}
 
 	setModelError(error: string | null) {
 		this.modelError = error;
+	}
+
+	private scheduleErrorClear() {
+		this.clearErrorTimer();
+		this.errorTimer = setTimeout(() => {
+			this.modelStatus = 'idle';
+			this.modelError = null;
+			this.errorTimer = null;
+		}, 3000);
+	}
+
+	private clearErrorTimer() {
+		if (this.errorTimer) {
+			clearTimeout(this.errorTimer);
+			this.errorTimer = null;
+		}
 	}
 
 	setConnectionStatus(status: ConnectionStatus) {

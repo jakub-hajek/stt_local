@@ -24,8 +24,8 @@ router = APIRouter()
 SAMPLE_RATE = 16000
 # Transcribe every 2 seconds of new audio
 MIN_SAMPLES_FOR_TRANSCRIBE = SAMPLE_RATE * 2
-# Finalize and reset buffer every 10 seconds to keep transcript flowing
-MAX_BUFFER_SAMPLES = SAMPLE_RATE * 10
+# Finalize and reset buffer every 5 seconds to keep transcript flowing
+MAX_BUFFER_SAMPLES = SAMPLE_RATE * 5
 
 
 async def _transcribe_and_send(

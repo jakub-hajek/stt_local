@@ -13,7 +13,13 @@ describe('AudioCapture', () => {
 		it('calls getUserMedia and sets up AudioWorklet', async () => {
 			await capture.start();
 
-			expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
+			expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+				audio: {
+					noiseSuppression: true,
+					echoCancellation: true,
+					autoGainControl: true,
+				},
+			});
 			expect(capture.isRecording).toBe(true);
 		});
 

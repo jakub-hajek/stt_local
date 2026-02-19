@@ -212,7 +212,7 @@ result = await engine.transcribe_async(audio_array, language="en")
 
 ### WebSocket Streaming (`app/routes/websocket.py`)
 
-Buffers incoming PCM audio and transcribes every 2 seconds of new data, sending `partial` results. Force-finalizes and resets the buffer at 30 seconds. On `stop`, transcribes the remaining buffer and sends `final` + `done`.
+Buffers incoming PCM audio and transcribes every 2 seconds of new data, sending `partial` results. Force-finalizes and resets the buffer at 5 seconds. On `stop`, transcribes the remaining buffer and sends `final` + `done`.
 
 ### File Upload (`app/routes/upload.py`)
 
