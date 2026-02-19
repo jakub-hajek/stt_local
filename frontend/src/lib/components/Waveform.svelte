@@ -5,12 +5,13 @@
 
 	interface Props {
 		getWaveformData: () => WaveformData;
+		fps?: number;
 	}
 
-	let { getWaveformData }: Props = $props();
+	let { getWaveformData, fps }: Props = $props();
 
 	let canvas: HTMLCanvasElement;
-	let animationId: number | null = null;
+	let intervalId: ReturnType<typeof setInterval> | null = null;
 
 	function draw() {
 		if (!canvas) return;
@@ -45,18 +46,26 @@
 			ctx.fillStyle = gradient;
 			ctx.fillRect(x, y, barWidth - 1, barHeight);
 		}
+	}
 
-		animationId = requestAnimationFrame(draw);
+	function startLoop() {
+		stopLoop();
+		const ms = Math.round(1000 / (fps ?? 60));
+		intervalId = setInterval(draw, ms);
+	}
+
+	function stopLoop() {
+		if (intervalId !== null) {
+			clearInterval(intervalId);
+			intervalId = null;
+		}
 	}
 
 	$effect(() => {
 		if (appState.isRecording) {
-			animationId = requestAnimationFrame(draw);
+			startLoop();
 		} else {
-			if (animationId !== null) {
-				cancelAnimationFrame(animationId);
-				animationId = null;
-			}
+			stopLoop();
 			draw();
 		}
 	});
@@ -67,9 +76,7 @@
 		canvas.height = rect.height || 60;
 		draw();
 
-		return () => {
-			if (animationId !== null) cancelAnimationFrame(animationId);
-		};
+		return () => stopLoop();
 	});
 </script>
 

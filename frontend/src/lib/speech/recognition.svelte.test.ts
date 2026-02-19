@@ -64,6 +64,12 @@ describe('SpeechRecognitionService', () => {
 			service.start('en');
 			expect(service.isListening).toBe(false);
 		});
+
+		it('clears interimText on start', () => {
+			(service as any).lastInterim = 'leftover';
+			service.start('en');
+			expect(service.interimText).toBe('');
+		});
 	});
 
 	describe('onresult', () => {
@@ -85,34 +91,69 @@ describe('SpeechRecognitionService', () => {
 			expect(onFinal).not.toHaveBeenCalled();
 		});
 
-		it('only processes from resultIndex', () => {
+		it('does not re-emit already emitted finals', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
 
-			// First result is old final, second is new final — resultIndex=1
-			rec.onresult(makeResultEvent(
-				[
-					{ transcript: 'old', isFinal: true },
-					{ transcript: 'new', isFinal: true },
-				],
-				1
-			));
-
-			// Should only emit 'new', not 'old'
+			// First event: result[0] is final
+			rec.onresult(makeResultEvent([
+				{ transcript: 'first', isFinal: true },
+			]));
 			expect(onFinal).toHaveBeenCalledTimes(1);
-			expect(onFinal).toHaveBeenCalledWith('new');
+
+			// Second event: result[0] still final, result[1] is new final
+			rec.onresult(makeResultEvent([
+				{ transcript: 'first', isFinal: true },
+				{ transcript: 'second', isFinal: true },
+			]));
+			// Should only emit 'second', not 'first' again
+			expect(onFinal).toHaveBeenCalledTimes(2);
+			expect(onFinal).toHaveBeenLastCalledWith('second');
 		});
 
-		it('concatenates multiple finals in one event', () => {
+		it('catches finals that Chrome finalizes silently', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			// First event: result[0] is interim
+			rec.onresult(makeResultEvent([
+				{ transcript: 'hello', isFinal: false },
+			]));
+			expect(onFinal).not.toHaveBeenCalled();
+
+			// Second event: result[0] finalized, result[1] started as interim
+			// Chrome may set resultIndex=1 here, but we scan from 0
+			rec.onresult(makeResultEvent(
+				[
+					{ transcript: 'hello world', isFinal: true },
+					{ transcript: 'next', isFinal: false },
+				],
+				1 // resultIndex=1, but result[0] was just finalized
+			));
+			expect(onFinal).toHaveBeenCalledWith('hello world');
+			expect(service.interimText).toBe('next');
+		});
+
+		it('emits each final result separately', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
 
 			rec.onresult(makeResultEvent([
-				{ transcript: 'hello ', isFinal: true },
+				{ transcript: 'hello', isFinal: true },
 				{ transcript: 'world', isFinal: true },
 			]));
 
-			expect(onFinal).toHaveBeenCalledWith('hello world');
+			expect(onFinal).toHaveBeenCalledTimes(2);
+			expect(onFinal).toHaveBeenCalledWith('hello');
+			expect(onFinal).toHaveBeenCalledWith('world');
+		});
+
+		it('ignores empty transcripts', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+			rec.onresult(makeResultEvent([{ transcript: '   ', isFinal: true }]));
+
+			expect(onFinal).not.toHaveBeenCalled();
 		});
 	});
 
@@ -136,6 +177,27 @@ describe('SpeechRecognitionService', () => {
 			expect(rec.start).not.toHaveBeenCalled();
 			expect(service.isListening).toBe(false);
 		});
+
+		it('flushes pending interim text as final on session end', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			// Simulate interim text that was never finalized
+			rec.onresult(makeResultEvent([{ transcript: 'pending words', isFinal: false }]));
+			expect(service.interimText).toBe('pending words');
+
+			rec.onend();
+			expect(onFinal).toHaveBeenCalledWith('pending words');
+			expect(service.interimText).toBe('');
+		});
+
+		it('does not flush empty interim text', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			rec.onend();
+			expect(onFinal).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('onerror', () => {
@@ -153,6 +215,13 @@ describe('SpeechRecognitionService', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
 			rec.onerror({ error: 'aborted' });
+			expect(service.error).toBeNull();
+		});
+
+		it('ignores no-speech', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+			rec.onerror({ error: 'no-speech' });
 			expect(service.error).toBeNull();
 		});
 

@@ -54,15 +54,19 @@
 	async function handleStart() {
 		log('handleStart: requesting mic access, language=%s', appState.language);
 		try {
-			stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			stream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					noiseSuppression: true,
+					echoCancellation: true,
+					autoGainControl: true,
+				},
+			});
 			log('mic stream acquired: tracks=%d', stream.getTracks().length);
 			audioCtx = new AudioContext();
-			log('AudioContext created: sampleRate=%d, state=%s', audioCtx.sampleRate, audioCtx.state);
 			const source = audioCtx.createMediaStreamSource(stream);
 			analyser = audioCtx.createAnalyser();
 			analyser.fftSize = 256;
 			source.connect(analyser);
-			log('AnalyserNode connected: fftSize=%d, frequencyBinCount=%d', analyser.fftSize, analyser.frequencyBinCount);
 
 			speech.start(appState.language);
 			appState.toggleRecording();
@@ -99,7 +103,7 @@
 		</div>
 	{:else}
 		<section class="controls">
-			<Waveform {getWaveformData} />
+			<Waveform {getWaveformData} fps={10} />
 			<MicControl onstart={handleStart} onstop={handleStop} disabled={!speech.isSupported} />
 			{#if speech.isListening}
 				<span class="status-info">Listening...</span>
@@ -191,6 +195,16 @@
 		color: var(--yellow);
 	}
 
+	.interim {
+		padding: 8px 12px;
+		background: var(--surface0);
+		border-radius: var(--radius);
+		color: var(--subtext0);
+		font-size: 0.875rem;
+		font-style: italic;
+		min-height: 1.5em;
+	}
+
 	.error {
 		text-align: center;
 		padding: 12px;
@@ -199,13 +213,4 @@
 		color: var(--red);
 		font-size: 0.875rem;
 	}
-
-	.interim {
-		padding: 8px 16px;
-		color: var(--overlay1);
-		font-style: italic;
-		font-size: 0.875rem;
-		border-left: 2px solid var(--surface1);
-	}
-
 </style>
