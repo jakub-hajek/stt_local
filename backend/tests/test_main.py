@@ -32,7 +32,6 @@ class TestCORSMiddleware:
     """Test that CORS middleware is configured."""
 
     def test_cors_middleware_present(self):
-        # FastAPI wraps middleware in a stack; check the middleware classes
         middleware_classes = [type(m).__name__ for m in app.user_middleware]
         assert "Middleware" in middleware_classes or len(app.user_middleware) > 0
 
@@ -40,15 +39,9 @@ class TestCORSMiddleware:
         """Integration test: an OPTIONS request should include CORS headers."""
         from fastapi.testclient import TestClient
 
-        # Pre-load engine so lifespan doesn't fail
         monkeypatch.setattr(TranscriptionEngine, "_instance", None)
         engine = TranscriptionEngine.get_instance()
-        engine.load(
-            model_size="tiny",
-            language="cs",
-            backend="faster-whisper",
-            device="cpu",
-        )
+        engine.load(model_repo="mlx-community/whisper-tiny", language="cs")
 
         client = TestClient(app)
         resp = client.options(
@@ -58,7 +51,6 @@ class TestCORSMiddleware:
                 "Access-Control-Request-Method": "GET",
             },
         )
-        # CORS should allow the configured origin
         assert "access-control-allow-origin" in resp.headers
 
 
@@ -67,27 +59,21 @@ class TestLifespanSetupLogging:
 
     def test_setup_logging_does_not_crash(self):
         from app.main import _setup_logging
-
-        # Should not raise
         _setup_logging()
 
 
 class TestLifespan:
-    """Test the lifespan context manager (lines 29-46 of main.py)."""
+    """Test the lifespan context manager."""
 
     @pytest.mark.asyncio
     async def test_lifespan_loads_engine(self, monkeypatch):
-        """The lifespan should call detect_backend and engine.load."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
+        """The lifespan should call get_model_repo and engine.load."""
         from app.main import lifespan
 
-        # Reset engine singleton
         monkeypatch.setattr(TranscriptionEngine, "_instance", None)
 
-        with patch("app.main.detect_backend", return_value=("faster-whisper", "cpu")):
-            async with lifespan(app):
-                engine = TranscriptionEngine.get_instance()
-                assert engine.is_loaded is True
-                assert engine.backend == "faster-whisper"
-                assert engine.device == "cpu"
+        async with lifespan(app):
+            engine = TranscriptionEngine.get_instance()
+            assert engine.is_loaded is True
+            assert engine.backend == "mlx-whisper"
+            assert engine.device == "mps"

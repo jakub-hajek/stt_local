@@ -46,10 +46,16 @@ html {
 	-moz-osx-font-smoothing: grayscale;
 }
 
+@keyframes fadeIn {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
 body {
 	background-color: var(--base);
 	color: var(--text);
 	min-height: 100dvh;
+	animation: fadeIn 2s ease-out;
 }
 
 button {

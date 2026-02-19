@@ -2,53 +2,24 @@
 
 import sys
 from types import ModuleType
-from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _mock_simulstreaming(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Provide a stub ``simulstreaming_whisper`` module so tests can run
-    without the real (heavy) SimulStreaming dependency installed."""
-    mod = ModuleType("simulstreaming_whisper")
+def _mock_mlx_whisper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide a stub ``mlx_whisper`` module so tests can run
+    without the real (heavy) mlx-whisper dependency installed."""
+    mod = ModuleType("mlx_whisper")
 
-    def _simulwhisper_args(parser):
-        parser.add_argument("--model_path", type=str, default="tiny")
-        parser.add_argument("--beams", type=int, default=1)
-        parser.add_argument("--frame_threshold", type=float, default=25)
+    def _transcribe(audio, *, path_or_hf_repo: str = "", language: str = "cs", **kwargs):
+        """Return empty transcription result by default."""
+        return {"text": "", "segments": []}
 
-    class _MockOnlineProcessor:
-        """Mimics SimulWhisperOnline interface."""
+    mod.transcribe = _transcribe  # type: ignore[attr-defined]
 
-        def __init__(self, asr=None):
-            self.asr = asr
-            self.init()
-
-        def init(self, offset=None):
-            self.audio_chunks = []
-            self.is_last = False
-
-        def insert_audio_chunk(self, audio):
-            self.audio_chunks.append(audio)
-
-        def process_iter(self):
-            # Return empty dict (no output) by default
-            return {}
-
-        def finish(self):
-            self.is_last = True
-            return {}
-
-    def _simul_asr_factory(args):
-        asr = MagicMock(name="mock_asr")
-        processor = _MockOnlineProcessor(asr)
-        return asr, processor
-
-    mod.simulwhisper_args = _simulwhisper_args  # type: ignore[attr-defined]
-    mod.simul_asr_factory = _simul_asr_factory  # type: ignore[attr-defined]
-
-    monkeypatch.setitem(sys.modules, "simulstreaming_whisper", mod)
+    monkeypatch.setitem(sys.modules, "mlx_whisper", mod)
 
 
 @pytest.fixture()
@@ -58,10 +29,5 @@ def loaded_engine(monkeypatch: pytest.MonkeyPatch) -> "TranscriptionEngine":
 
     monkeypatch.setattr(TranscriptionEngine, "_instance", None)
     engine = TranscriptionEngine.get_instance()
-    engine.load(
-        model_size="tiny",
-        language="cs",
-        backend="faster-whisper",
-        device="cpu",
-    )
+    engine.load(model_repo="mlx-community/whisper-tiny", language="cs")
     return engine

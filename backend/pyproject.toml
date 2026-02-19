@@ -5,23 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stt-local-backend"
 version = "0.1.0"
-description = "Local Speech-to-Text backend using SimulStreaming (UFAL)"
+description = "Local Speech-to-Text backend using mlx-whisper"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "websockets",
     "numpy",
-    "torch",
-    "torchaudio",
+    "mlx-whisper",
     "librosa",
     "pydantic-settings",
     "python-multipart",
 ]
 
 [project.optional-dependencies]
-cuda = ["faster-whisper"]
-mps = ["mlx-whisper"]
 dev = [
     "pytest",
     "pytest-asyncio",

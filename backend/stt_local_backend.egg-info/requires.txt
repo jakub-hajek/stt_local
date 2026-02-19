@@ -6,6 +6,7 @@ torch
 torchaudio
 librosa
 pydantic-settings
+python-multipart
 
 [cuda]
 faster-whisper

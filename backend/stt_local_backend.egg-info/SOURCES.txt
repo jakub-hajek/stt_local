@@ -12,6 +12,7 @@ app/engine/factory.py
 app/engine/processor.py
 app/routes/__init__.py
 app/routes/health.py
+app/routes/upload.py
 app/routes/websocket.py
 stt_local_backend.egg-info/PKG-INFO
 stt_local_backend.egg-info/SOURCES.txt
@@ -23,4 +24,5 @@ tests/test_factory.py
 tests/test_main.py
 tests/test_normalizer.py
 tests/test_processor.py
+tests/test_upload.py
 tests/test_websocket.py

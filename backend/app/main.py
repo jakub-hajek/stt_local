@@ -1,15 +1,13 @@
 """FastAPI application entry point for STT Local backend."""
 
 import logging
-import warnings
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
-from app.engine.detector import detect_backend
+from app.config import get_model_repo, settings
 from app.engine.factory import TranscriptionEngine
 from app.routes import health, upload, websocket
 
@@ -24,40 +22,17 @@ def _setup_logging() -> None:
     )
 
 
-def _setup_warnings() -> None:
-    """Filter a known PyTorch deprecation warning emitted by SimulStreaming.
-
-    This warning currently comes from an internal torch operation used by the
-    SimulStreaming stack and can flood logs while not affecting behavior.
-    """
-    warnings.filterwarnings(
-        "ignore",
-        message=(
-            r"An output with one or more elements was resized since it had shape \[\], "
-            r"which does not match the required output shape"
-        ),
-        category=UserWarning,
-        module=r"torch\.functional",
-    )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: load the transcription model at startup."""
     _setup_logging()
-    _setup_warnings()
     logger = logging.getLogger(__name__)
 
-    backend, device = detect_backend()
-    logger.info("Detected backend=%s, device=%s", backend, device)
+    model_repo = get_model_repo(settings.model_size)
+    logger.info("Using model repo: %s", model_repo)
 
     engine = TranscriptionEngine.get_instance()
-    engine.load(
-        model_size=settings.model_size,
-        language=settings.language,
-        backend=backend,
-        device=device,
-    )
+    engine.load(model_repo=model_repo, language=settings.language)
     logger.info("STT Local backend is ready")
 
     yield  # Application runs here
@@ -67,7 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="STT Local",
-    description="Local Speech-to-Text backend using SimulStreaming (UFAL)",
+    description="Local Speech-to-Text backend using mlx-whisper",
     version="0.1.0",
     lifespan=lifespan,
 )

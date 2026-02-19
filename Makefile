@@ -21,7 +21,7 @@ dev-fe:
 	cd frontend && bun run dev
 
 dev-be:
-	cd backend && PYTHONPATH="$(PWD)/SimulStreaming:$$PYTHONPATH" .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765 --log-level info
+	cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765 --log-level info
 
 # ── Tests ────────────────────────────────────────────────
 test: test-fe test-be

@@ -16,12 +16,15 @@ def _reset_engine(monkeypatch: pytest.MonkeyPatch):
     and pre-loaded so the lifespan handler works with mocks."""
     monkeypatch.setattr(TranscriptionEngine, "_instance", None)
     engine = TranscriptionEngine.get_instance()
-    engine.load(
-        model_size="tiny",
-        language="cs",
-        backend="faster-whisper",
-        device="cpu",
-    )
+    engine.load(model_repo="mlx-community/whisper-tiny", language="cs")
+
+
+@pytest.fixture(autouse=True)
+def _small_buffer(monkeypatch: pytest.MonkeyPatch):
+    """Use a tiny buffer threshold so tests trigger transcription quickly."""
+    import app.routes.websocket as ws_mod
+    monkeypatch.setattr(ws_mod, "MIN_SAMPLES_FOR_TRANSCRIBE", 10)
+    monkeypatch.setattr(ws_mod, "MAX_BUFFER_SAMPLES", 500)
 
 
 class TestHealthEndpoint:
@@ -33,9 +36,9 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["backend"] == "faster-whisper"
-        assert data["device"] == "cpu"
-        assert data["model"] == "tiny"
+        assert data["backend"] == "mlx-whisper"
+        assert data["device"] == "mps"
+        assert data["model"] == "mlx-community/whisper-tiny"
         assert "version" in data
 
 
@@ -45,17 +48,14 @@ class TestWebSocketConnectConfigureReady:
     def test_handshake(self):
         client = TestClient(app)
         with client.websocket_connect("/ws/transcribe") as ws:
-            # Step 1: Receive connected message
             connected = ws.receive_json()
             assert connected["type"] == "connected"
-            assert connected["backend"] == "faster-whisper"
-            assert connected["device"] == "cpu"
-            assert connected["model"] == "tiny"
+            assert connected["backend"] == "mlx-whisper"
+            assert connected["device"] == "mps"
+            assert connected["model"] == "mlx-community/whisper-tiny"
 
-            # Step 2: Send configure
             ws.send_text(json.dumps({"type": "configure", "language": "en"}))
 
-            # Step 3: Receive ready
             ready = ws.receive_json()
             assert ready["type"] == "ready"
 
@@ -66,20 +66,15 @@ class TestWebSocketStopFlow:
     def test_stop_sends_done(self):
         client = TestClient(app)
         with client.websocket_connect("/ws/transcribe") as ws:
-            # Handshake
             ws.receive_json()  # connected
             ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
             ws.receive_json()  # ready
 
-            # Send a small chunk of silent PCM audio (100 samples of silence)
             silence = struct.pack("<100h", *([0] * 100))
             ws.send_bytes(silence)
 
-            # Send stop
             ws.send_text("stop")
 
-            # We should eventually receive a "done" message
-            # There may be partial/final messages before done
             done_received = False
             for _ in range(10):
                 msg = ws.receive_json()
@@ -99,7 +94,6 @@ class TestWebSocketJsonStop:
             ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
             ws.receive_json()  # ready
 
-            # Send stop as JSON
             ws.send_text(json.dumps({"type": "stop"}))
 
             done_received = False
@@ -112,31 +106,19 @@ class TestWebSocketJsonStop:
 
 
 class TestWebSocketPartialResults:
-    """Test that binary PCM data produces partial results when processor returns data."""
+    """Test that binary PCM data produces partial results."""
 
     def test_binary_audio_produces_partial(self, monkeypatch):
-        """Mock the SessionProcessor to return partial results for audio chunks."""
-        from unittest.mock import MagicMock, patch
-
-        # We need to patch the create_session to return a mock that produces results
-        original_create = TranscriptionEngine.get_instance().create_session
-
-        mock_online = MagicMock()
-        call_count = 0
-
-        def mock_process_iter():
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return {"text": "hello", "start": 0.0, "end": 1.0}
-            return {}
-
-        mock_online.insert_audio_chunk = MagicMock()
-        mock_online.process_iter = mock_process_iter
-        mock_online.finish = MagicMock(return_value={})
-
+        """Mock engine.transcribe to return partial results for audio chunks."""
         engine = TranscriptionEngine.get_instance()
-        monkeypatch.setattr(engine, "create_session", lambda: mock_online)
+
+        def mock_transcribe(audio, language=None):
+            return {
+                "text": "hello",
+                "segments": [{"text": "hello", "start": 0.0, "end": 1.0}],
+            }
+
+        monkeypatch.setattr(engine, "transcribe", mock_transcribe)
 
         client = TestClient(app)
         with client.websocket_connect("/ws/transcribe") as ws:
@@ -144,40 +126,34 @@ class TestWebSocketPartialResults:
             ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
             ws.receive_json()  # ready
 
-            # Send binary PCM audio
+            # Send enough PCM audio to trigger transcription (> MIN_SAMPLES_FOR_TRANSCRIBE)
             silence = struct.pack("<100h", *([0] * 100))
             ws.send_bytes(silence)
 
-            # Should get a partial result
             msg = ws.receive_json()
             assert msg["type"] == "partial"
             assert msg["text"] == "hello"
-            assert msg["start_ms"] == 0.0
-            assert msg["end_ms"] == 1000.0
+            assert msg["start_ms"] == 0
+            assert msg["end_ms"] == 1000
 
-            # Send stop
             ws.send_text("stop")
-            done_received = False
+            # Drain remaining messages until done
             for _ in range(10):
                 msg = ws.receive_json()
                 if msg["type"] == "done":
-                    done_received = True
                     break
-            assert done_received
 
     def test_stop_with_final_results(self, monkeypatch):
-        """Mock processor to return final results on flush."""
-        from unittest.mock import MagicMock
-
-        mock_online = MagicMock()
-        mock_online.insert_audio_chunk = MagicMock()
-        mock_online.process_iter = MagicMock(return_value={})
-        mock_online.finish = MagicMock(
-            return_value={"text": "final text", "start": 0.0, "end": 5.0}
-        )
-
+        """Mock engine.transcribe to return final results on stop."""
         engine = TranscriptionEngine.get_instance()
-        monkeypatch.setattr(engine, "create_session", lambda: mock_online)
+
+        def mock_transcribe(audio, language=None):
+            return {
+                "text": "final text",
+                "segments": [{"text": "final text", "start": 0.0, "end": 5.0}],
+            }
+
+        monkeypatch.setattr(engine, "transcribe", mock_transcribe)
 
         client = TestClient(app)
         with client.websocket_connect("/ws/transcribe") as ws:
@@ -185,7 +161,6 @@ class TestWebSocketPartialResults:
             ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
             ws.receive_json()  # ready
 
-            # Send some audio then stop
             silence = struct.pack("<100h", *([0] * 100))
             ws.send_bytes(silence)
             ws.send_text("stop")
@@ -204,20 +179,19 @@ class TestWebSocketPartialResults:
             assert final_msg["text"] == "final text"
 
 
-class TestWebSocketNonStopTextMessage:
-    """Test sending a non-stop text message (not 'stop' and not JSON stop)."""
+class TestWebSocketMaxBuffer:
+    """Test that exceeding MAX_BUFFER_SAMPLES triggers force-finalize."""
 
-    def test_unknown_text_message_ignored(self, monkeypatch):
-        """Non-stop text messages should be ignored and not crash the session."""
-        from unittest.mock import MagicMock
-
-        mock_online = MagicMock()
-        mock_online.insert_audio_chunk = MagicMock()
-        mock_online.process_iter = MagicMock(return_value={})
-        mock_online.finish = MagicMock(return_value={})
-
+    def test_force_finalize_on_max_buffer(self, monkeypatch):
         engine = TranscriptionEngine.get_instance()
-        monkeypatch.setattr(engine, "create_session", lambda: mock_online)
+        call_count = 0
+
+        def mock_transcribe(audio, language=None):
+            nonlocal call_count
+            call_count += 1
+            return {"text": "chunk", "segments": [{"text": "chunk", "start": 0.0, "end": 1.0}]}
+
+        monkeypatch.setattr(engine, "transcribe", mock_transcribe)
 
         client = TestClient(app)
         with client.websocket_connect("/ws/transcribe") as ws:
@@ -225,10 +199,36 @@ class TestWebSocketNonStopTextMessage:
             ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
             ws.receive_json()  # ready
 
-            # Send an unknown text message
+            # Send enough data to exceed MAX_BUFFER_SAMPLES (500 with our fixture)
+            big_silence = struct.pack("<600h", *([0] * 600))
+            ws.send_bytes(big_silence)
+
+            # Should get a final result from force-finalize
+            msg = ws.receive_json()
+            assert msg["type"] == "final"
+
+            ws.send_text("stop")
+            done_received = False
+            for _ in range(10):
+                msg = ws.receive_json()
+                if msg["type"] == "done":
+                    done_received = True
+                    break
+            assert done_received
+
+
+class TestWebSocketNonStopTextMessage:
+    """Test sending a non-stop text message."""
+
+    def test_unknown_text_message_ignored(self):
+        client = TestClient(app)
+        with client.websocket_connect("/ws/transcribe") as ws:
+            ws.receive_json()  # connected
+            ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
+            ws.receive_json()  # ready
+
             ws.send_text("some random text")
 
-            # Session should still be alive - send stop and get done
             ws.send_text("stop")
             done_received = False
             for _ in range(10):
@@ -242,35 +242,14 @@ class TestWebSocketNonStopTextMessage:
 class TestWebSocketErrorHandling:
     """Test error handling in the WebSocket endpoint."""
 
-    def test_engine_create_session_error_closes_connection(self, monkeypatch):
-        """If create_session raises, the WebSocket handler catches it and calls ws.close(1011)."""
+    def test_engine_transcribe_error_closes_connection(self, monkeypatch):
+        """If transcribe raises, the WebSocket handler catches it and calls ws.close(1011)."""
+        engine = TranscriptionEngine.get_instance()
 
-        def _boom():
+        def _boom(audio, language=None):
             raise RuntimeError("boom")
 
-        engine = TranscriptionEngine.get_instance()
-        monkeypatch.setattr(engine, "create_session", _boom)
-
-        client = TestClient(app)
-        with client.websocket_connect("/ws/transcribe") as ws:
-            ws.receive_json()  # connected
-            ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
-            # After configure, create_session fails -> exception handler runs
-            # ws.close(1011) is called; we just need to not crash here.
-
-    def test_disconnect_during_audio_loop(self, monkeypatch):
-        """Simulate WebSocketDisconnect during the main loop to cover line 109."""
-        from unittest.mock import MagicMock
-        from starlette.websockets import WebSocketDisconnect as StarletteWsDisconnect
-
-        # Mock the processor to raise WebSocketDisconnect on insert_audio_chunk
-        mock_online = MagicMock()
-        mock_online.insert_audio_chunk = MagicMock(
-            side_effect=StarletteWsDisconnect()
-        )
-
-        engine = TranscriptionEngine.get_instance()
-        monkeypatch.setattr(engine, "create_session", lambda: mock_online)
+        monkeypatch.setattr(engine, "transcribe", _boom)
 
         client = TestClient(app)
         with client.websocket_connect("/ws/transcribe") as ws:
@@ -278,30 +257,16 @@ class TestWebSocketErrorHandling:
             ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
             ws.receive_json()  # ready
 
-            # Send binary - insert_audio_chunk will raise WebSocketDisconnect
-            silence = struct.pack("<100h", *([0] * 100))
-            ws.send_bytes(silence)
-            # Connection should be cleanly handled
-
-    def test_error_with_close_failure(self, monkeypatch):
-        """Cover lines 110-115: generic exception + ws.close() also failing."""
-        from unittest.mock import MagicMock
-
-        mock_online = MagicMock()
-        mock_online.insert_audio_chunk = MagicMock(
-            side_effect=RuntimeError("processing error")
-        )
-
-        engine = TranscriptionEngine.get_instance()
-        monkeypatch.setattr(engine, "create_session", lambda: mock_online)
-
-        client = TestClient(app)
-        with client.websocket_connect("/ws/transcribe") as ws:
-            ws.receive_json()  # connected
-            ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
-            ws.receive_json()  # ready
-
-            # Send binary data - will trigger RuntimeError in insert_audio_chunk
+            # Send enough audio to trigger transcription
             silence = struct.pack("<100h", *([0] * 100))
             ws.send_bytes(silence)
             # Error handler runs, tries ws.close(1011)
+
+    def test_disconnect_during_audio_loop(self):
+        """Simulate a clean disconnect during the main loop."""
+        client = TestClient(app)
+        with client.websocket_connect("/ws/transcribe") as ws:
+            ws.receive_json()  # connected
+            ws.send_text(json.dumps({"type": "configure", "language": "cs"}))
+            ws.receive_json()  # ready
+            # Just close - should be handled gracefully

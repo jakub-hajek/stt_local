@@ -2,6 +2,27 @@
 
 from pydantic_settings import BaseSettings
 
+MODEL_REPO_MAP: dict[str, str] = {
+    "tiny": "mlx-community/whisper-tiny",
+    "base": "mlx-community/whisper-base",
+    "small": "mlx-community/whisper-small",
+    "medium": "mlx-community/whisper-medium",
+    "large": "mlx-community/whisper-large-v3",
+    "large-v3": "mlx-community/whisper-large-v3",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+
+def get_model_repo(model_size: str) -> str:
+    """Map a short model name to its HuggingFace repo path."""
+    try:
+        return MODEL_REPO_MAP[model_size]
+    except KeyError:
+        raise ValueError(
+            f"Unknown model size {model_size!r}. "
+            f"Valid options: {', '.join(MODEL_REPO_MAP)}"
+        )
+
 
 class Settings(BaseSettings):
     """Settings for the STT Local backend.

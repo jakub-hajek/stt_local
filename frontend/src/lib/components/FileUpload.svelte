@@ -36,6 +36,7 @@
 />
 
 <button
+	style="display:none;"
 	class="upload-btn"
 	class:processing={appState.isProcessingFile}
 	onclick={handleClick}

@@ -79,3 +79,9 @@ backend/large-v3.pt
 tiny.pt
 test_stt.wav
 medium.pt
+backend/stt_local_backend.egg-info/PKG-INFO
+backend/stt_local_backend.egg-info/requires.txt
+backend/stt_local_backend.egg-info/PKG-INFO
+backend/stt_local_backend.egg-info/requires.txt
+backend/stt_local_backend.egg-info/SOURCES.txt
+backend/stt_local_backend.egg-info/PKG-INFO

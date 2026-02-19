@@ -1,31 +1,34 @@
-"""Thread-safe singleton for the SimulStreaming transcription engine."""
+"""Thread-safe singleton for mlx-whisper transcription engine."""
 
-import argparse
+import asyncio
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 class TranscriptionEngine:
-    """Singleton wrapper around SimulStreaming's simul_asr_factory.
+    """Singleton wrapper around mlx_whisper.transcribe().
 
-    Manages loading the model once and creating per-session online
-    processors in a thread-safe manner.
+    Loads the model once at startup (via a warm-up call) and provides
+    a thread-safe transcribe() method for all routes.
+
+    All MLX calls are serialized through a single dedicated thread to
+    avoid Metal GPU memory corruption from concurrent thread access.
     """
 
     _instance: "TranscriptionEngine | None" = None
     _lock = threading.Lock()
 
     def __init__(self) -> None:
-        self._asr: Any = None
-        self._online_class: Any = None
-        self._model_size: str = ""
+        self._model_repo: str = ""
         self._language: str = ""
-        self._backend: str = ""
-        self._device: str = ""
         self._loaded = False
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
 
     @classmethod
     def get_instance(cls) -> "TranscriptionEngine":
@@ -48,132 +51,71 @@ class TranscriptionEngine:
 
     @property
     def model_size(self) -> str:
-        return self._model_size
+        return self._model_repo
 
     @property
     def backend(self) -> str:
-        return self._backend
+        return "mlx-whisper" if self._loaded else ""
 
     @property
     def device(self) -> str:
-        return self._device
+        return "mps" if self._loaded else ""
 
-    def load(
-        self,
-        model_size: str,
-        language: str,
-        backend: str,
-        device: str,
-    ) -> None:
-        """Load the ASR model via SimulStreaming's simul_asr_factory.
-
-        This should be called once during application startup.
-        """
+    def load(self, model_repo: str, language: str) -> None:
+        """Load the model by running a warm-up transcription on silence."""
         with self._lock:
             if self._loaded:
                 logger.warning("TranscriptionEngine already loaded, skipping reload")
                 return
 
-            logger.info(
-                "Loading model: size=%s, language=%s, backend=%s, device=%s",
-                model_size,
-                language,
-                backend,
-                device,
+            logger.info("Loading model: repo=%s, language=%s", model_repo, language)
+
+            import mlx_whisper
+
+            # Warm-up: transcribe 1 second of silence to load weights
+            silence = np.zeros(16000, dtype=np.float32)
+            mlx_whisper.transcribe(
+                silence,
+                path_or_hf_repo=model_repo,
+                language=language,
             )
 
-            from simulstreaming_whisper import simul_asr_factory, simulwhisper_args
-
-            self._force_simulstreaming_device(device)
-
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--min-chunk-size", type=float, default=1.2)
-            parser.add_argument("--lan", type=str, default=language)
-            parser.add_argument("--task", type=str, default="transcribe")
-            parser.add_argument("--vac", action="store_true")
-            parser.add_argument("--log-level", default="INFO")
-            simulwhisper_args(parser)
-
-            args = parser.parse_args(
-                [
-                    "--model_path",
-                    model_size,
-                    "--beams",
-                    "5",
-                    "--frame_threshold",
-                    "25",
-                    "--lan",
-                    language,
-                    "--vac",
-                ]
-            )
-            args.logdir = None
-
-            asr, online_processor = simul_asr_factory(args)
-
-            self._asr = asr
-            # Store the class so we can create new sessions from the same ASR
-            self._online_class = type(online_processor)
-            self._model_size = model_size
+            self._model_repo = model_repo
             self._language = language
-            self._backend = backend
-            self._device = device
             self._loaded = True
 
             logger.info("Model loaded successfully")
 
-    @staticmethod
-    def _force_simulstreaming_device(device: str) -> None:
-        """Force SimulStreaming's internal Whisper loader to honor our detected device.
+    def transcribe(self, audio: np.ndarray, language: str | None = None) -> dict:
+        """Transcribe audio synchronously using mlx_whisper.
 
-        SimulStreaming's bundled Whisper loader defaults to CUDA/CPU when no explicit
-        device is passed. Our integration does not pass a device through its CLI args,
-        so on Apple Silicon it can silently fall back to CPU.
-        """
-        try:
-            import simulstreaming.whisper.simul_whisper.simul_whisper as simul_whisper_mod
-        except ImportError:
-            # Tests use a stub module and may not provide the full package tree.
-            return
-
-        original_load_model = simul_whisper_mod.load_model
-        if getattr(original_load_model, "__stt_local_forced_device__", None) == device:
-            return
-
-        def _load_model_with_forced_device(
-            name: str,
-            device_arg: str | None = None,
-            download_root: str | None = None,
-            in_memory: bool = False,
-        ):
-            selected_device = device_arg or device
-            return original_load_model(
-                name=name,
-                device=selected_device,
-                download_root=download_root,
-                in_memory=in_memory,
-            )
-
-        setattr(_load_model_with_forced_device, "__stt_local_forced_device__", device)
-        simul_whisper_mod.load_model = _load_model_with_forced_device
-        logger.info("Forced SimulStreaming Whisper loader device=%s", device)
-
-    def create_session(self) -> Any:
-        """Create a new online session processor for a single transcription session.
-
-        Reuses the already-loaded ASR model — no model re-download.
-        Each session gets fresh state via ``SimulWhisperOnline(asr)``.
+        Args:
+            audio: Float32 numpy array of audio samples at 16kHz.
+            language: Override language (defaults to engine language).
 
         Returns:
-            A new SimulWhisperOnline processor with clean state.
-
-        Raises:
-            RuntimeError: If the engine has not been loaded yet.
+            The mlx_whisper result dict with 'text' and 'segments' keys.
         """
         if not self._loaded:
             raise RuntimeError(
                 "TranscriptionEngine has not been loaded. Call load() first."
             )
 
-        # SimulWhisperOnline.__init__(asr) creates fresh state from existing model
-        return self._online_class(self._asr)
+        import mlx_whisper
+
+        return mlx_whisper.transcribe(
+            audio,
+            path_or_hf_repo=self._model_repo,
+            language=language or self._language,
+        )
+
+    async def transcribe_async(self, audio: np.ndarray, language: str | None = None) -> dict:
+        """Transcribe audio without blocking the event loop.
+
+        All calls are serialized through a single-thread executor to
+        prevent concurrent Metal GPU access which causes memory corruption.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor, self.transcribe, audio, language
+        )

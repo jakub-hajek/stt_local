@@ -1,5 +1,7 @@
 """REST endpoint for file upload transcription."""
 
+import asyncio
+import io
 import logging
 
 import librosa
@@ -7,16 +9,34 @@ import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.engine.factory import TranscriptionEngine
-from app.engine.processor import SessionProcessor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 SAMPLE_RATE = 16000
-# For file upload we use large chunks (30s) to minimize decoding loop overhead.
-# SimulStreaming runs a full decode per chunk, so tiny chunks are very slow.
-CHUNK_SAMPLES = SAMPLE_RATE * 30  # 30 seconds at 16kHz
+
+
+def _decode_audio(raw_bytes: bytes) -> np.ndarray:
+    """Decode and resample audio to 16kHz mono float32 (thread-safe)."""
+    audio, _ = librosa.load(
+        io.BytesIO(raw_bytes),
+        sr=SAMPLE_RATE,
+        mono=True,
+    )
+    return audio
+
+
+def _segments_from_result(result: dict) -> list[dict]:
+    """Extract segments with ms timing from an mlx_whisper result."""
+    segments: list[dict] = []
+    for seg in result.get("segments", []):
+        segments.append({
+            "text": seg["text"].strip(),
+            "start_ms": round(seg["start"] * 1000),
+            "end_ms": round(seg["end"] * 1000),
+        })
+    return segments
 
 
 @router.post("/api/transcribe")
@@ -33,37 +53,23 @@ async def transcribe_file(
     if not engine.is_loaded:
         raise HTTPException(status_code=503, detail="Transcription engine not loaded")
 
-    # Read and decode audio
     raw_bytes = await file.read()
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Empty file")
 
     try:
-        audio, _ = librosa.load(
-            __import__("io").BytesIO(raw_bytes),
-            sr=SAMPLE_RATE,
-            mono=True,
-        )
+        audio = await asyncio.to_thread(_decode_audio, raw_bytes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not decode audio file: {e}")
 
     duration_ms = len(audio) / SAMPLE_RATE * 1000
 
-    # Create session and feed audio in chunks
-    online_processor = engine.create_session()
-    session = SessionProcessor(online_processor)
-
-    segments = []
-    for offset in range(0, len(audio), CHUNK_SAMPLES):
-        chunk = audio[offset : offset + CHUNK_SAMPLES]
-        results = session.feed_audio(chunk)
-        for text, start_ms, end_ms in results:
-            segments.append({"text": text, "start_ms": start_ms, "end_ms": end_ms})
-
-    # Flush remaining
-    finals = session.flush()
-    for text, start_ms, end_ms in finals:
-        segments.append({"text": text, "start_ms": start_ms, "end_ms": end_ms})
+    try:
+        result = await engine.transcribe_async(audio, language)
+        segments = _segments_from_result(result)
+    except Exception:
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=500, detail="Transcription failed")
 
     full_text = " ".join(seg["text"] for seg in segments).strip()
 

@@ -24,44 +24,51 @@ class TestResetInstance:
         assert engine1 is not engine2
 
 
-class TestCreateSessionNotLoaded:
-    """Test create_session raises RuntimeError when not loaded."""
+class TestTranscribeNotLoaded:
+    """Test transcribe raises RuntimeError when not loaded."""
 
-    def test_create_session_raises_when_not_loaded(self, monkeypatch):
+    def test_transcribe_raises_when_not_loaded(self, monkeypatch):
         monkeypatch.setattr(TranscriptionEngine, "_instance", None)
         engine = TranscriptionEngine.get_instance()
-        # Engine is NOT loaded
         with pytest.raises(RuntimeError, match="has not been loaded"):
-            engine.create_session()
+            import numpy as np
+            engine.transcribe(np.zeros(100, dtype=np.float32))
 
 
 class TestDoubleLoadWarning:
     """Test that loading twice logs a warning and skips reload."""
 
     def test_double_load_skips(self, loaded_engine):
-        """loaded_engine is already loaded; calling load again should not crash."""
         assert loaded_engine.is_loaded is True
-        # Call load again - should just log warning and return
-        loaded_engine.load(
-            model_size="tiny",
-            language="cs",
-            backend="faster-whisper",
-            device="cpu",
-        )
-        # Still loaded, same state
+        loaded_engine.load(model_repo="mlx-community/whisper-tiny", language="cs")
         assert loaded_engine.is_loaded is True
-        assert loaded_engine.model_size == "tiny"
+        assert loaded_engine.model_size == "mlx-community/whisper-tiny"
 
 
-class TestCreateSessionWhenLoaded:
-    """Test create_session returns a new processor when loaded."""
+class TestTranscribeDelegation:
+    """Test that transcribe delegates to mlx_whisper."""
 
-    def test_create_session_returns_processor(self, loaded_engine):
-        session = loaded_engine.create_session()
-        assert session is not None
-        # Should be a fresh instance each time
-        session2 = loaded_engine.create_session()
-        assert session is not session2
+    def test_transcribe_returns_result(self, loaded_engine):
+        import numpy as np
+        result = loaded_engine.transcribe(np.zeros(16000, dtype=np.float32))
+        assert "text" in result
+        assert "segments" in result
+
+    def test_transcribe_with_language_override(self, loaded_engine, monkeypatch):
+        import sys
+        import numpy as np
+
+        calls = []
+        original_mod = sys.modules["mlx_whisper"]
+
+        def _tracking_transcribe(audio, *, path_or_hf_repo="", language="cs", **kwargs):
+            calls.append(language)
+            return {"text": "", "segments": []}
+
+        monkeypatch.setattr(original_mod, "transcribe", _tracking_transcribe)
+
+        loaded_engine.transcribe(np.zeros(16000, dtype=np.float32), language="en")
+        assert calls[-1] == "en"
 
 
 class TestEngineProperties:
@@ -77,6 +84,6 @@ class TestEngineProperties:
 
     def test_properties_after_load(self, loaded_engine):
         assert loaded_engine.is_loaded is True
-        assert loaded_engine.model_size == "tiny"
-        assert loaded_engine.backend == "faster-whisper"
-        assert loaded_engine.device == "cpu"
+        assert loaded_engine.model_size == "mlx-community/whisper-tiny"
+        assert loaded_engine.backend == "mlx-whisper"
+        assert loaded_engine.device == "mps"

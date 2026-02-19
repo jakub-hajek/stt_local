@@ -6,7 +6,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/backend/.venv"
-SIMULSTREAMING_DIR="$SCRIPT_DIR/SimulStreaming"
 
 cleanup() {
     echo "Shutting down..."
@@ -25,8 +24,7 @@ fi
 
 # Start backend using the venv Python
 echo "Starting backend (uvicorn)..."
-PYTHONPATH="$SIMULSTREAMING_DIR${PYTHONPATH:+:$PYTHONPATH}" \
-    "$VENV_DIR/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8765 --log-level info --app-dir "$SCRIPT_DIR/backend" &
+"$VENV_DIR/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8765 --log-level info --app-dir "$SCRIPT_DIR/backend" &
 BACKEND_PID=$!
 
 # Wait for backend to be ready

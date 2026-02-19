@@ -11,6 +11,7 @@ Requires-Dist: torch
 Requires-Dist: torchaudio
 Requires-Dist: librosa
 Requires-Dist: pydantic-settings
+Requires-Dist: python-multipart
 Provides-Extra: cuda
 Requires-Dist: faster-whisper; extra == "cuda"
 Provides-Extra: mps
