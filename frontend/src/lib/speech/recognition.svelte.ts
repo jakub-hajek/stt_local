@@ -48,6 +48,9 @@ export class SpeechRecognitionService {
 	private shouldRestart = false;
 	private lastInterim = '';
 	private emittedUpTo = 0;
+	// Track the best interim text seen per result index so we can detect
+	// when Chrome truncates on finalization and use the longer interim instead.
+	private bestInterimByIndex = new Map<number, string>();
 	private readonly onFinal: (text: string) => void;
 
 	// Stale interim watchdog: forces stop/restart if interim text doesn't change
@@ -99,15 +102,31 @@ export class SpeechRecognitionService {
 			for (let i = 0; i < event.results.length; i++) {
 				if (event.results[i].isFinal) {
 					if (i >= this.emittedUpTo) {
-						const text = event.results[i][0].transcript.trim();
+						const finalText = event.results[i][0].transcript.trim();
+						const bestInterim = (this.bestInterimByIndex.get(i) ?? '').trim();
+						// Chrome sometimes truncates text on finalization — the final
+						// transcript is shorter than the interim that was displayed.
+						// Use the longer version to avoid losing captured text.
+						const text = bestInterim.length > finalText.length ? bestInterim : finalText;
 						if (text) {
-							log('final [%d]:', i, text);
+							if (bestInterim.length > finalText.length) {
+								log('final [%d]: using interim (final truncated: "%s" → "%s")', i, finalText, text);
+							} else {
+								log('final [%d]:', i, text);
+							}
 							this.onFinal(text);
 						}
+						this.bestInterimByIndex.delete(i);
 						this.emittedUpTo = i + 1;
 					}
 				} else {
-					interim += event.results[i][0].transcript;
+					const currentInterim = event.results[i][0].transcript;
+					interim += currentInterim;
+					// Track the longest interim seen for this result index
+					const prev = this.bestInterimByIndex.get(i) ?? '';
+					if (currentInterim.length > prev.length) {
+						this.bestInterimByIndex.set(i, currentInterim);
+					}
 				}
 			}
 			this.lastInterim = interim;
@@ -144,8 +163,9 @@ export class SpeechRecognitionService {
 				this.interimText = '';
 			}
 
-			// Reset counter — Chrome starts a fresh results list on restart
+			// Reset counters — Chrome starts a fresh results list on restart
 			this.emittedUpTo = 0;
+			this.bestInterimByIndex.clear();
 
 			if (this.shouldRestart) {
 				const delay = this.computeRestartDelay();
@@ -172,6 +192,7 @@ export class SpeechRecognitionService {
 		this.lastInterim = '';
 		this.interimText = '';
 		this.emittedUpTo = 0;
+		this.bestInterimByIndex.clear();
 		this.consecutiveRapidRestarts = 0;
 		this.lastErrorWasNetwork = false;
 		this.recognition.lang = LANG_MAP[lang];

@@ -148,6 +148,42 @@ describe('SpeechRecognitionService', () => {
 			expect(onFinal).toHaveBeenCalledWith('world');
 		});
 
+		it('uses longer interim when Chrome truncates on finalization', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			// Chrome shows full interim text
+			rec.onresult(makeResultEvent([
+				{ transcript: 'this is a long sentence with many words', isFinal: false },
+			]));
+			expect(service.interimText).toBe('this is a long sentence with many words');
+
+			// Chrome finalizes with truncated text
+			rec.onresult(makeResultEvent([
+				{ transcript: 'this is a long', isFinal: true },
+			]));
+
+			// Should use the longer interim version
+			expect(onFinal).toHaveBeenCalledWith('this is a long sentence with many words');
+		});
+
+		it('uses final when it is longer than interim', () => {
+			service.start('en');
+			const rec = (service as any).recognition;
+
+			// Short interim
+			rec.onresult(makeResultEvent([
+				{ transcript: 'hello', isFinal: false },
+			]));
+
+			// Final is longer (Chrome refined it)
+			rec.onresult(makeResultEvent([
+				{ transcript: 'hello world', isFinal: true },
+			]));
+
+			expect(onFinal).toHaveBeenCalledWith('hello world');
+		});
+
 		it('ignores empty transcripts', () => {
 			service.start('en');
 			const rec = (service as any).recognition;
