@@ -2,51 +2,83 @@
 	import { onMount } from 'svelte';
 	import { appState } from '$lib/state/app.svelte';
 	import { transcriptState } from '$lib/state/transcript.svelte';
-	import { audioCapture } from '$lib/audio/capture';
 	import { SpeechRecognitionService } from '$lib/speech/recognition.svelte';
+	import type { WaveformData } from '$lib/audio/types';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import MicControl from '$lib/components/MicControl.svelte';
 	import Waveform from '$lib/components/Waveform.svelte';
 	import TranscriptDisplay from '$lib/components/TranscriptDisplay.svelte';
 
-	const speech = new SpeechRecognitionService();
+	const DEV = import.meta.env.DEV;
+	const log = DEV ? (...args: unknown[]) => console.debug('[OnlineSTT]', ...args) : () => {};
 
-	speech.onFinal = (text) => {
+	const speech = new SpeechRecognitionService((text) => {
 		transcriptState.addEntry({
 			text,
 			timestamp: Date.now(),
 			language: appState.language,
 			isFinal: true,
 		});
-	};
+	});
+
+	let analyser: AnalyserNode | null = null;
+	let stream: MediaStream | null = null;
+	let audioCtx: AudioContext | null = null;
+
+	function getWaveformData(): WaveformData {
+		if (!analyser) return new Uint8Array(0);
+		const data = new Uint8Array(analyser.frequencyBinCount);
+		analyser.getByteFrequencyData(data);
+		return data;
+	}
 
 	onMount(() => {
-		const prevModelStatus = appState.modelStatus;
-		const prevIsRecording = appState.isRecording;
-		appState.setModelStatus('ready');
 		transcriptState.clear();
 
 		return () => {
 			speech.stop();
-			audioCapture.stop();
-			appState.setModelStatus(prevModelStatus);
-			if (prevIsRecording !== appState.isRecording) {
-				appState.toggleRecording();
-			}
+			cleanupAudio();
 			transcriptState.clear();
 		};
 	});
 
+	function cleanupAudio() {
+		log('cleaning up audio resources');
+		analyser = null;
+		stream?.getTracks().forEach((t) => t.stop());
+		stream = null;
+		audioCtx?.close();
+		audioCtx = null;
+	}
+
 	async function handleStart() {
-		await audioCapture.start();
-		speech.start(appState.language);
-		appState.toggleRecording();
+		log('handleStart: requesting mic access, language=%s', appState.language);
+		try {
+			stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			log('mic stream acquired: tracks=%d', stream.getTracks().length);
+			audioCtx = new AudioContext();
+			log('AudioContext created: sampleRate=%d, state=%s', audioCtx.sampleRate, audioCtx.state);
+			const source = audioCtx.createMediaStreamSource(stream);
+			analyser = audioCtx.createAnalyser();
+			analyser.fftSize = 256;
+			source.connect(analyser);
+			log('AnalyserNode connected: fftSize=%d, frequencyBinCount=%d', analyser.fftSize, analyser.frequencyBinCount);
+
+			speech.start(appState.language);
+			appState.toggleRecording();
+			log('recording started');
+		} catch (err) {
+			cleanupAudio();
+			console.error('Failed to start recording:', err);
+		}
 	}
 
 	function handleStop() {
+		log('handleStop: stopping recording');
 		speech.stop();
-		audioCapture.stop();
+		cleanupAudio();
 		appState.toggleRecording();
+		log('recording stopped');
 	}
 </script>
 
@@ -67,8 +99,8 @@
 		</div>
 	{:else}
 		<section class="controls">
-			<Waveform />
-			<MicControl onstart={handleStart} onstop={handleStop} />
+			<Waveform {getWaveformData} />
+			<MicControl onstart={handleStart} onstop={handleStop} disabled={!speech.isSupported} />
 			{#if speech.isListening}
 				<span class="status-info">Listening...</span>
 			{/if}
@@ -79,11 +111,11 @@
 		{/if}
 	{/if}
 
-	<TranscriptDisplay />
-
 	{#if speech.interimText}
 		<div class="interim">{speech.interimText}</div>
 	{/if}
+
+	<TranscriptDisplay />
 
 </main>
 

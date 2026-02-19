@@ -207,6 +207,21 @@ Object.defineProperty(globalThis, 'WebSocket', {
 	writable: true
 });
 
+// Mock SpeechRecognition
+class MockSpeechRecognition {
+	continuous = false;
+	interimResults = false;
+	lang = '';
+	onresult: ((event: any) => void) | null = null;
+	onerror: ((event: any) => void) | null = null;
+	onend: (() => void) | null = null;
+	start = vi.fn();
+	stop = vi.fn();
+}
+
+(globalThis as any).SpeechRecognition = MockSpeechRecognition;
+(globalThis as any).webkitSpeechRecognition = MockSpeechRecognition;
+
 // Mock fetch for health checks
 globalThis.fetch = vi.fn().mockResolvedValue({
 	ok: true,

@@ -3,16 +3,18 @@ import { render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import Waveform from './Waveform.svelte';
 import { appState } from '../state/app.svelte';
-import * as captureModule from '$lib/audio/capture';
 
 describe('Waveform', () => {
+	const mockGetWaveformData = vi.fn(() => new Uint8Array(0));
+
 	beforeEach(() => {
 		if (appState.isRecording) appState.toggleRecording();
 		vi.clearAllMocks();
+		mockGetWaveformData.mockReturnValue(new Uint8Array(0));
 	});
 
 	it('renders canvas element', () => {
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 
 		const canvas = screen.getByLabelText('Audio waveform');
 		expect(canvas).toBeInTheDocument();
@@ -20,13 +22,13 @@ describe('Waveform', () => {
 	});
 
 	it('canvas has proper aria-label', () => {
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 
 		expect(screen.getByLabelText('Audio waveform')).toBeInTheDocument();
 	});
 
 	it('draws idle line when not recording', () => {
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 
 		const ctx = HTMLCanvasElement.prototype.getContext('2d')!;
 		// Draw is called on mount, should draw idle line
@@ -37,9 +39,9 @@ describe('Waveform', () => {
 		// Mock getWaveformData to return data
 		const mockData = new Uint8Array(128);
 		mockData.fill(100);
-		vi.spyOn(captureModule.audioCapture, 'getWaveformData').mockReturnValue(mockData);
+		mockGetWaveformData.mockReturnValue(mockData);
 
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 
 		appState.toggleRecording();
 		await tick();
@@ -50,7 +52,7 @@ describe('Waveform', () => {
 	});
 
 	it('stops animation when recording stops', async () => {
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 
 		appState.toggleRecording();
 		await tick();
@@ -66,10 +68,10 @@ describe('Waveform', () => {
 	it('draws frequency bars when recording with data', async () => {
 		const mockData = new Uint8Array(128);
 		mockData.fill(200);
-		vi.spyOn(captureModule.audioCapture, 'getWaveformData').mockReturnValue(mockData);
+		mockGetWaveformData.mockReturnValue(mockData);
 
 		appState.toggleRecording();
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 		await tick();
 
 		// Wait for requestAnimationFrame to fire
@@ -80,9 +82,9 @@ describe('Waveform', () => {
 	});
 
 	it('handles empty waveform data while recording', async () => {
-		vi.spyOn(captureModule.audioCapture, 'getWaveformData').mockReturnValue(new Uint8Array(0));
+		mockGetWaveformData.mockReturnValue(new Uint8Array(0));
 
-		render(Waveform);
+		render(Waveform, { props: { getWaveformData: mockGetWaveformData } });
 
 		appState.toggleRecording();
 		await tick();

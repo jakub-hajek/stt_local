@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { appState } from '$lib/state/app.svelte';
-	import { audioCapture } from '$lib/audio/capture';
+	import type { WaveformData } from '$lib/audio/types';
 	import { onMount } from 'svelte';
+
+	interface Props {
+		getWaveformData: () => WaveformData;
+	}
+
+	let { getWaveformData }: Props = $props();
 
 	let canvas: HTMLCanvasElement;
 	let animationId: number | null = null;
@@ -11,7 +17,7 @@
 		const ctx = canvas.getContext('2d');
 		if (!ctx) return;
 
-		const data = audioCapture.getWaveformData();
+		const data = getWaveformData();
 		const width = canvas.width;
 		const height = canvas.height;
 

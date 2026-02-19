@@ -4,9 +4,10 @@
 	interface Props {
 		onstart: () => void;
 		onstop: () => void;
+		disabled?: boolean;
 	}
 
-	let { onstart, onstop }: Props = $props();
+	let { onstart, onstop, disabled }: Props = $props();
 
 	function handleClick() {
 		if (appState.isRecording) {
@@ -16,7 +17,7 @@
 		}
 	}
 
-	const isDisabled = $derived(appState.modelStatus !== 'ready');
+	const isDisabled = $derived(disabled ?? appState.modelStatus !== 'ready');
 </script>
 
 <button

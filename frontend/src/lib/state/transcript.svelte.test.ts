@@ -121,6 +121,22 @@ describe('TranscriptState', () => {
 		expect(transcriptState.fullText).toBe('');
 	});
 
+	it('caps entries at 500', () => {
+		for (let i = 0; i < 501; i++) {
+			transcriptState.addEntry({
+				text: `Entry ${i}`,
+				timestamp: i * 1000,
+				language: 'en',
+				isFinal: true
+			});
+		}
+
+		expect(transcriptState.entries).toHaveLength(500);
+		// First entry should have been dropped
+		expect(transcriptState.entries[0].text).toBe('Entry 1');
+		expect(transcriptState.entries[499].text).toBe('Entry 500');
+	});
+
 	it('handles non-final entries', () => {
 		transcriptState.addEntry({
 			text: 'Partial',

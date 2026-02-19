@@ -155,7 +155,7 @@
 	</section>
 
 	<section class="controls">
-		<Waveform />
+		<Waveform getWaveformData={() => audioCapture.getWaveformData()} />
 		<div class="mic-row">
 			<MicControl onstart={handleStart} onstop={handleStop} />
 			<FileUpload onfile={handleFileUpload} />

@@ -66,4 +66,17 @@ describe('MicControl', () => {
 
 		expect(screen.getByRole('button')).not.toBeDisabled();
 	});
+
+	it('respects explicit disabled prop override', () => {
+		render(MicControl, { props: { onstart, onstop, disabled: true } });
+
+		expect(screen.getByRole('button')).toBeDisabled();
+	});
+
+	it('is enabled when disabled prop is false regardless of model status', () => {
+		appState.setModelStatus('idle');
+		render(MicControl, { props: { onstart, onstop, disabled: false } });
+
+		expect(screen.getByRole('button')).not.toBeDisabled();
+	});
 });

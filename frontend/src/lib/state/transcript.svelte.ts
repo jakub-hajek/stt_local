@@ -9,10 +9,11 @@ export interface TranscriptEntry {
 }
 
 class TranscriptState {
+	private static MAX_ENTRIES = 500;
 	entries: TranscriptEntry[] = $state([]);
 
 	addEntry(entry: Omit<TranscriptEntry, 'id'>) {
-		this.entries = [...this.entries, { ...entry, id: crypto.randomUUID() }];
+		this.entries = [...this.entries, { ...entry, id: crypto.randomUUID() }].slice(-TranscriptState.MAX_ENTRIES);
 	}
 
 	get fullText(): string {
