@@ -222,4 +222,4 @@ See [API.md](API.md) for the full API reference, including REST endpoints, WebSo
 
 ## License
 
-Private project.
+This project is licensed under the [MIT License](LICENSE).
