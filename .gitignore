@@ -72,7 +72,7 @@ backend/.coverage
 backend/.coverage
 frontend/stt
 frontend/build
-
+frontend/build./
 # Local external dependency clone
 SimulStreaming/
 test_stt.mp3
@@ -84,3 +84,4 @@ backend/stt_local_backend.egg-info/PKG-INFO
 backend/stt_local_backend.egg-info/requires.txt
 backend/stt_local_backend.egg-info/SOURCES.txt
 backend/stt_local_backend.egg-info/PKG-INFO
+deploy.sh
