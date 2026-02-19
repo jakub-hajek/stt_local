@@ -140,11 +140,11 @@
 		{/if}
 	{/if}
 
+	<TranscriptDisplay />
+
 	{#if speech.interimText}
 		<div class="interim">{speech.interimText}</div>
 	{/if}
-
-	<TranscriptDisplay />
 
 </main>
 
