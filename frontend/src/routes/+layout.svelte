@@ -9,8 +9,8 @@
 <h1 class="main-title">Speech to Text PoC, darek pro Nikolu :)</h1>
 
 <nav>
-	<a href="{base}/" class:active={page.url.pathname === `${base}/`}>Online</a>
-	<a href="{base}/local" class:active={page.url.pathname.startsWith(`${base}/local`)}>Local</a>
+	<a href="{base}/" class:active={page.url.pathname === `${base}/`}>Browser API</a>
+	<a href="{base}/local" class:active={page.url.pathname.startsWith(`${base}/local`)}>Whisper BE</a>
 </nav>
 
 {@render children()}
